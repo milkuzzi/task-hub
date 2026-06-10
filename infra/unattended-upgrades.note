@@ -1,0 +1,5 @@
+Enable OS security auto-updates on the VPS host:
+  apt-get install -y unattended-upgrades
+  dpkg-reconfigure -plow unattended-upgrades
+SSH: PasswordAuthentication no; PermitRootLogin no (keys only).
+Pin docker image versions by digest in production compose override.

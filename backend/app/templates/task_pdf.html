@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "DejaVu"; src: local("DejaVu Sans"); }
+  @page { size: A4; margin: 20mm; }
+  body { font-family: "DejaVu", sans-serif; color: #111; }
+  h1 { font-size: 18pt; }
+  .meta { margin-top: 8mm; }
+  .meta div { margin: 2mm 0; }
+</style>
+</head>
+<body>
+  <h1>№{{ "%06d"|format(task.public_no) }} — {{ task.title }}</h1>
+  <div class="meta">
+    <div><b>Статус:</b> {{ task.status_ru }}</div>
+    <div><b>Дедлайн:</b> {{ task.deadline_msk or "—" }}</div>
+    <div><b>Описание:</b> {{ task.description or "—" }}</div>
+    {% if task.completion_info %}<div><b>Результат:</b> {{ task.completion_info }}</div>{% endif %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,144 @@
+# Single-VPS deployment. timestamptz stored UTC; UI/email render Europe/Moscow.
+# Every service has a healthcheck; dependents wait on service_healthy.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: taskhub
+      POSTGRES_USER: taskhub
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      TZ: UTC
+    secrets: [pg_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskhub -d taskhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [back]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1
+    environment:
+      DATABASE_URL: postgres://taskhub@postgres:5432/taskhub
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      AUTH_TYPE: scram-sha-256
+    secrets: [pg_password]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U taskhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [back]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [back]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/data"]
+
+  backend:
+    build: ./backend
+    command: >
+      gunicorn app.main:app -k uvicorn.workers.UvicornWorker
+      --workers 4 --preload --timeout 30 --graceful-timeout 30
+      --bind 0.0.0.0:8000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://taskhub@pgbouncer:6432/taskhub
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://taskhub@postgres:5432/taskhub
+      REDIS_URL: redis://redis:6379/0
+      TZ: UTC
+    secrets: [pg_password, sendpulse_secret, app_secret]
+    depends_on:
+      pgbouncer: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    volumes: ["uploads:/data/uploads"]
+    networks: [back, front]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  worker:
+    build: ./backend
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://taskhub@pgbouncer:6432/taskhub
+      REDIS_URL: redis://redis:6379/0
+      TZ: UTC
+    secrets: [pg_password, sendpulse_secret]
+    depends_on:
+      backend: { condition: service_healthy }
+    networks: [back]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  beat:
+    build: ./backend
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=INFO"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TZ: Europe/Moscow
+    depends_on:
+      worker: { condition: service_started }
+    networks: [back]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      backend: { condition: service_healthy }
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - uploads:/data/uploads:ro
+      - certs:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [front]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  pgdata:
+  uploads:
+  certs:
+
+networks:
+  front:
+  back:
+    internal: true   # postgres/redis/pgbouncer never exposed outside docker
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
+  sendpulse_secret:
+    file: ./secrets/sendpulse_secret.txt
+  app_secret:
+    file: ./secrets/app_secret.txt
