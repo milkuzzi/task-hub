@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { TaskList } from "./TaskList";
+import { api } from "../../api/client";
+import type { TaskDetail } from "../../shared/schemas";
 import type { ListFilters, Scope } from "./queries";
 import type { TaskStatus } from "../../shared/schemas";
 
@@ -15,6 +18,18 @@ export default function TasksPage() {
   const [overdue, setOverdue] = useState<boolean | undefined>(undefined);
   const [sort, setSort] = useState<"deadline" | "created_at">("deadline");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
+  const navigate = useNavigate();
+
+  async function searchByNo(raw: string) {
+    const q = raw.trim();
+    if (!q) return;
+    try {
+      const { data } = await api<TaskDetail>(`/api/tasks/search?q=${encodeURIComponent(q)}`);
+      navigate(`/tasks/${data.id}`);
+    } catch {
+      window.dispatchEvent(new CustomEvent("toast", { detail: "Задача с таким номером не найдена" }));
+    }
+  }
 
   const filters: ListFilters = {
     scope,
@@ -47,8 +62,8 @@ export default function TasksPage() {
           className="rounded border px-2 py-1"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              const v = (e.target as HTMLInputElement).value;
-              window.location.href = `/api/tasks/search?q=${encodeURIComponent(v)}`;
+              e.preventDefault();
+              searchByNo((e.target as HTMLInputElement).value);
             }
           }}
         />

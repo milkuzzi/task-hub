@@ -58,6 +58,18 @@ export interface TaskListItem {
   version: number;
 }
 
+export interface TaskDetail {
+  id: string;
+  public_no: number;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  deadline: string | null;
+  is_overdue: boolean;
+  version: number;
+  completion_info: string | null;
+}
+
 export interface TaskListResponse {
   items: TaskListItem[];
   next_cursor: string | null;

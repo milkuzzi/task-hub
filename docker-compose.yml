@@ -108,7 +108,7 @@ services:
     cap_drop: ["ALL"]
 
   nginx:
-    image: nginx:1.27-alpine
+    build: ./infra/nginx   # custom image: nginx + ngx_brotli dynamic modules
     depends_on:
       backend: { condition: service_healthy }
     ports: ["80:80", "443:443"]
