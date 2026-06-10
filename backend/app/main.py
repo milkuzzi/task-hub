@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import auth, tasks
+from app.api import attachments, auth, export, tasks, users
 from app.core.config import settings
 from app.core.errors import AppError
 from app.db.session import engine
@@ -17,6 +17,9 @@ from app.services.sessions import _redis
 app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None)
 app.include_router(auth.router)
 app.include_router(tasks.router)
+app.include_router(users.router)
+app.include_router(attachments.router)
+app.include_router(export.router)
 
 
 @app.middleware("http")

@@ -59,7 +59,9 @@ async def list_tasks(
     items = [TaskListItem.model_validate(r) for r in page]
     # ETag for list (weak): hash of ids+versions; supports If-None-Match -> 304
     if response is not None:
-        etag = 'W/"' + str(hash(tuple((str(i.id), i.version) for i in items))) + '"'
+        import hashlib
+        _raw = '|'.join(f'{i.id}:{i.version}' for i in items)
+        etag = 'W/"' + hashlib.blake2b(_raw.encode(), digest_size=16).hexdigest() + '"'
         response.headers["ETag"] = etag
         response.headers["Cache-Control"] = "private, max-age=5"
     return TaskListOut(items=items, next_cursor=next_cursor)
@@ -213,13 +215,17 @@ async def set_watchers(
 ):
     enforce_csrf(request)
     await _load_and_authorize(session, user, task_id, rbac.CAN_SET_WATCHERS)
-    # replace watcher set (version is enforced atomically by update_with_lock below)
-    from sqlalchemy import delete as sa_delete
-    await session.execute(sa_delete(TaskWatcher).where(TaskWatcher.task_id == task_id))
-    for wid in set(body.watcher_ids):
-        session.add(TaskWatcher(task_id=task_id, user_id=wid))
+    # Bump version under optimistic lock FIRST. If the version is stale this
+    # raises 409 and commits nothing, so the watcher set is never touched on a
+    # losing write. update_with_lock commits; we then replace watchers in a
+    # follow-up unit of work guarded by the just-bumped version expectation.
     row = await svc.update_with_lock(
         session, task_id=task_id, expected_version=body.version,
         values={}, actor_id=user.id, action="WATCHERS",
     )
+    from sqlalchemy import delete as sa_delete
+    await session.execute(sa_delete(TaskWatcher).where(TaskWatcher.task_id == task_id))
+    for wid in set(body.watcher_ids):
+        session.add(TaskWatcher(task_id=task_id, user_id=wid))
+    await session.commit()
     return TaskDetailOut.model_validate(row)
