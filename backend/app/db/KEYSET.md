@@ -49,3 +49,42 @@ Expected node: Index Only Scan using ix_tasks_owner_deadline, Heap Fetches: 0
 scope=watching joins task_watchers (covering ix_watchers_user on
 (user_id, task_id)). The WATCHER restriction is enforced in SQL — a watcher only
 sees tasks present in task_watchers for their user_id. 403/404 leak nothing.
+
+
+## EXPLAIN ANALYZE — index-only proof (100k tasks)
+
+Reproduce after seeding (`N=100000 python -m app.workers.seed_tasks`):
+
+```sql
+VACUUM (ANALYZE) tasks;
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT public_no, title, status, is_overdue, version, deadline, id
+FROM tasks
+WHERE deleted_at IS NULL
+  AND owner_id = :owner
+  AND (deadline > :cur OR (deadline = :cur AND id > :cur_id) OR deadline IS NULL)
+ORDER BY deadline ASC NULLS LAST, id ASC
+LIMIT 50;
+```
+
+Expected plan shape (the covering partial index makes this index-only):
+
+```
+Limit  (cost=... rows=50)
+  ->  Index Only Scan using ix_tasks_owner_deadline on tasks
+        Index Cond: (owner_id = :owner)
+        Filter: (deleted_at IS NULL)  -- satisfied by the partial WHERE
+        Heap Fetches: 0
+ Planning Time: ~0.2 ms
+ Execution Time: < 30 ms
+```
+
+Key markers to confirm the budget is met:
+- `Index Only Scan using ix_tasks_owner_deadline` (NOT a Seq Scan / Bitmap Heap Scan)
+- `Heap Fetches: 0` — the INCLUDE columns (public_no,title,status,is_overdue,
+  version) plus deadline+id come straight from the index, no heap visits.
+- `Execution Time < 30 ms` on the reference 4 vCPU / 8 GB box after VACUUM ANALYZE.
+
+If `Heap Fetches > 0`, the visibility map is stale — re-run `VACUUM (ANALYZE)`.
+The `created_at`-sorted scope uses `ix_tasks_owner_created` with the same shape.
