@@ -108,7 +108,10 @@ services:
     cap_drop: ["ALL"]
 
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./infra/nginx
+      args:
+        NGINX_VERSION: "1.27.0"
     depends_on:
       backend: { condition: service_healthy }
     ports: ["80:80", "443:443"]

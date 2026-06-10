@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { Attachments } from "./Attachments";
 
 interface TaskDetail {
   id: string; public_no: number; title: string; description: string | null;
@@ -72,6 +73,8 @@ export default function TaskCardPage() {
           </button>
         )}
       </div>
+
+      <Attachments taskId={id} canEdit={t.status !== "DONE" && t.status !== "CANCELLED"} />
 
       <section aria-labelledby="history-h">
         <h2 id="history-h" className="font-medium">История</h2>
