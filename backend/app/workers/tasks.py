@@ -21,6 +21,7 @@ from sqlalchemy import create_engine, text
 
 from app.core.config import settings
 from app.workers.celery_app import celery_app
+from app.core.observability import record_failed_notification
 
 MSK = dt.timezone(dt.timedelta(hours=3))
 
@@ -67,6 +68,7 @@ def _idempotent_send(conn, *, task_id, user_id, ntype, target_date, to_email, su
             'UPDATE notifications_log SET attempts = attempts + 1, last_error = :e '
             'WHERE task_id=:t AND user_id=:u AND type=:ty AND target_date=:d'
         ), {'e': str(exc)[:1000], 't': task_id, 'u': user_id, 'ty': ntype, 'd': target_date})
+        record_failed_notification()
         return False
     conn.execute(text(
         'UPDATE notifications_log SET sent_at = now() '
@@ -183,6 +185,7 @@ def retry_failed() -> int:
             except Exception as exc:  # noqa: BLE001
                 c.execute(text('UPDATE notifications_log SET attempts=attempts+1, last_error=:e WHERE id=:id'),
                           {'e': str(exc)[:1000], 'id': r.id})
+                record_failed_notification()
                 continue
             c.execute(text('UPDATE notifications_log SET sent_at=now() WHERE id=:id'), {'id': r.id})
             sent += 1

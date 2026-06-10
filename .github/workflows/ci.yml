@@ -26,6 +26,11 @@ jobs:
         run: mypy app || true
       - name: pip-audit (fail on vulnerabilities)
         run: pip-audit -r requirements.txt --strict
+      - name: Pytest (logic-level suite)
+        run: |
+          pip install pytest
+          cd ..
+          python -m pytest tests/test_optimistic_lock.py tests/test_notifications_idempotent.py tests/test_keyset.py tests/test_public_no.py tests/test_rbac.py tests/test_files_magic.py -q
 
   frontend:
     runs-on: ubuntu-latest
