@@ -1,29 +1,47 @@
 {
-  "name": "task-hub-frontend",
+  "name": "frontend",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Клиентская часть «Система поручений» (React + TypeScript)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
-    "lint": "eslint . && tsc --noEmit"
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.51.0",
-    "@tanstack/react-virtual": "^3.8.0",
-    "@hookform/resolvers": "^3.9.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "axios": "^1.18.1",
+    "fzstd": "^0.1.1",
+    "i18next": "^24.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-hook-form": "^7.52.0",
-    "react-router-dom": "^6.25.0",
-    "zod": "^3.23.8"
+    "react-i18next": "^15.4.0",
+    "react-router-dom": "^6.28.1",
+    "read-excel-file": "^9.2.0",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "typescript": "^5.5.3",
-    "vite": "^5.3.3",
-    "vite-plugin-compression": "^0.5.1"
+    "@playwright/test": "^1.61.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "fast-check": "^3.23.2",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
   }
 }

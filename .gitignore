@@ -1,23 +1,37 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Node / frontend
+# Dependencies
 node_modules/
-frontend/dist/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
 *.local
 
-# Secrets & env
-.env
-secrets/*.txt
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# Prisma
+prisma/*.db
 
 # OS / editor
 .DS_Store
 .idea/
 .vscode/
+
+# Attachments storage (вне веб-корня)
+storage/
+
+# Agent workflow scratch
+.superpowers/
+
+# Local browser smoke artifacts
+dogfood-output/
+frontend/dogfood-output/

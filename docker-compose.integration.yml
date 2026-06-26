@@ -1,0 +1,41 @@
+# Тестовая инфраструктура для интеграционных тестов backend (задача 21.2).
+#
+# Поднимает изолированные PostgreSQL и Redis на нестандартных портах, чтобы не
+# конфликтовать с локальными сервисами разработчика. Используется вместе с
+# `npm run test:integration` (см. backend/package.json) и переменной окружения
+# RUN_INTEGRATION=1.
+#
+# Запуск:
+#   docker compose -f docker-compose.integration.yml up -d
+#   DATABASE_URL=postgresql://postgres:postgres@localhost:5433/task_hub_test \
+#     npx prisma migrate deploy
+#   RUN_INTEGRATION=1 \
+#     DATABASE_URL=postgresql://postgres:postgres@localhost:5433/task_hub_test \
+#     REDIS_PORT=6380 \
+#     npm --workspace backend run test:integration
+#   docker compose -f docker-compose.integration.yml down -v
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: task_hub_test
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d task_hub_test']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 5s
+      retries: 30

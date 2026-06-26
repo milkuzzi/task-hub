@@ -1,0 +1,370 @@
+// Prisma-схема «Система поручений».
+//
+// Единый источник истины модели данных (см. design.md → Data Models).
+// Сущности: User, UserEmail, Task, TaskAssignment, Chat, Message, Attachment,
+// MessageRead, AuditEntry, Notification, Session, MaxLink, ChatMute,
+// DeadlineReminder, BackupRecord.
+//
+// Время хранится в UTC (timestamptz); преобразование в MSK выполняется в слое
+// представления (ClockService). См. design.md → «Часовой пояс».
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================================
+// Перечисления
+// =========================================================================
+
+/// Роли пользователей (Req 2.1).
+enum Role {
+  ADMIN
+  MANAGER
+  EXECUTOR
+}
+
+/// Статусы конечного автомата задачи (Req 10).
+enum TaskStatus {
+  IN_PROGRESS // «В работе»
+  WAITING // «Ожидает»
+  DONE // «Выполнено»
+  NEEDS_ADMIN // «Требует администратора»
+  CANCELLED // «Отменено»
+}
+
+/// Вид назначения пользователя на задачу (Req 9.1, 2.4).
+enum AssignmentKind {
+  EXECUTOR
+  MANAGER
+}
+
+/// Тип уведомления (Req 13, 14, 15).
+enum NotificationType {
+  TASK_ASSIGNED // назначение исполнителем/менеджером (13.2)
+  TASK_UNASSIGNED // снятие с задачи (13.3)
+  TASK_FIELD_CHANGED // изменение Названия/Описания/Дедлайна (13.4)
+  TASK_STATUS_CHANGED // смена статуса (13.6)
+  TASK_REOPENED // переоткрытие (13.11)
+  TASK_CANCELLED // отмена (13.11)
+  TASK_RETURNED // возврат из «Отменено» (13.11)
+  DEADLINE_REMINDER_FAR // дальний порог напоминания (13.7, 13.9)
+  DEADLINE_REMINDER_NEAR // ближний порог напоминания (13.8, 13.10)
+  CHAT_MESSAGE // новое сообщение в чате (14.1)
+  MANAGER_ROLE_CHANGED // смена роли менеджера (15.5, 15.6)
+  ADMIN_TRANSFER // передача роли администратора (3.5)
+  ACCOUNT_REGISTRATION // приглашение/регистрация (15.1)
+}
+
+/// Статус доставки уведомления по каналу (сайт/MAX) (Req 13.13, 14.6).
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  RETRY
+  FAILED
+  SKIPPED
+}
+
+/// Порог напоминания о дедлайне (Req 13.7–13.10).
+enum ReminderThreshold {
+  FAR
+  NEAR
+}
+
+/// Результат резервного копирования (Req 21).
+enum BackupResult {
+  SUCCESS
+  FAILED
+  SKIPPED
+  INTEGRITY_ERROR
+}
+
+// =========================================================================
+// Пользователи и доступ
+// =========================================================================
+
+/// Пользователь системы (Req 2, 5, 6, 8).
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  displayName      String
+  passwordHash     String? // null до установки пароля по ссылке (Req 5.5)
+  role             Role
+  avatarPath       String?
+  isActive         Boolean   @default(false) // активируется при установке пароля (Req 5.4, 5.5)
+  deletedAt        DateTime? @db.Timestamptz // null если активен; soft-delete (Req 8.2)
+  failedLoginCount Int       @default(0) // последовательные неудачи входа (Req 5.9)
+  lockedUntil      DateTime? @db.Timestamptz // блокировка после 5 неудач (Req 5.9, 5.10)
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @db.Timestamptz
+
+  emails              UserEmail[]
+  assignments         TaskAssignment[]
+  messages            Message[]
+  reads               MessageRead[]
+  auditEntries        AuditEntry[]
+  notifications       Notification[]
+  sessions            Session[]
+  maxLink             MaxLink?
+  chatMutes           ChatMute[]
+  uploadedAttachments Attachment[]
+
+  @@index([role])
+  @@index([deletedAt])
+}
+
+/// История адресов электронной почты пользователя (≥50 адресов, Req 7.1).
+model UserEmail {
+  id       String   @id @default(uuid()) @db.Uuid
+  userId   String   @db.Uuid
+  email    String
+  usedFrom DateTime @default(now()) @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+  @@index([userId])
+  @@index([email])
+}
+
+/// Аутентифицированная сессия пользователя (Req 5.7, 19.10).
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenId   String   @unique
+  expiresAt DateTime @db.Timestamptz
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Привязка профиля MAX к пользователю (Req 6.6, 16.1, 16.2).
+model MaxLink {
+  id        String  @id @default(uuid()) @db.Uuid
+  userId    String  @unique @db.Uuid
+  maxUserId String  @unique
+  mutedAll  Boolean @default(false) // полная отписка от MAX (Req 16.5)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// =========================================================================
+// Задачи
+// =========================================================================
+
+/// Задача (поручение) (Req 9, 10).
+model Task {
+  id            String     @id @default(uuid()) @db.Uuid
+  title         String // 1..200 (Req 9.1)
+  description   String? // 0..5000 (Req 9.1)
+  deadline      DateTime   @db.Timestamptz
+  status        TaskStatus @default(IN_PROGRESS) // при создании «В работе» (Req 9.4)
+  adminReviewed Boolean    @default(false) // признак проверки администратором (Req 10.10)
+  messageCount  Int        @default(0) // 0..9999 с насыщением (Req 9.7, 9.9)
+  createdAt     DateTime   @default(now()) @db.Timestamptz
+  doneAt        DateTime?  @db.Timestamptz // момент перехода в «Выполнено» (Req 17.3)
+  updatedAt     DateTime   @updatedAt @db.Timestamptz
+
+  assignments       TaskAssignment[]
+  chat              Chat?
+  auditEntries      AuditEntry[]
+  notifications     Notification[]
+  deadlineReminders DeadlineReminder[]
+  attachments       Attachment[]
+
+  @@index([status])
+  @@index([deadline])
+  @@index([createdAt])
+}
+
+/// Назначение пользователя на задачу как исполнителя или менеджера (Req 9.1, 2.4).
+model TaskAssignment {
+  id     String         @id @default(uuid()) @db.Uuid
+  taskId String         @db.Uuid
+  userId String         @db.Uuid
+  kind   AssignmentKind
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId, kind])
+  @@index([taskId])
+  @@index([userId])
+  @@index([userId, kind])
+}
+
+// =========================================================================
+// Чат, сообщения, вложения
+// =========================================================================
+
+/// Realtime-чат задачи (один к одному с задачей) (Req 11.1, 9.5).
+model Chat {
+  id     String @id @default(uuid()) @db.Uuid
+  taskId String @unique @db.Uuid
+
+  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  messages Message[]
+}
+
+/// Сообщение в чате задачи (Req 11.3–11.8).
+model Message {
+  id                String    @id @default(uuid()) @db.Uuid
+  chatId            String    @db.Uuid
+  authorId          String?   @db.Uuid // null при hard-delete автора (Req 8.3)
+  authorDisplayName String // денормализовано: имя на момент создания (Req 8.4)
+  text              String // 1..4000 (Req 11.3, 11.4)
+  createdAt         DateTime  @default(now()) @db.Timestamptz
+  editedAt          DateTime? @db.Timestamptz // метка «изменено» (Req 11.5)
+  deleted           Boolean   @default(false) // метка «Сообщение удалено» (Req 11.7)
+
+  chat          Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author        User?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  attachments   Attachment[]
+  reads         MessageRead[]
+  notifications Notification[]
+
+  @@index([chatId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+/// Вложение в Чате Задачи (Req 12).
+///
+/// Связь с Сообщением необязательна (`messageId` nullable): Вложение
+/// загружается ДО отправки Сообщения и до этого момента существует «висящим»
+/// (непривязанным). При отправке Сообщения Вложение привязывается к нему
+/// (`messageId` устанавливается). Прямые поля `taskId` и `uploaderId` позволяют
+/// проверять членство в Чате Задачи и право на привязку без опоры на Сообщение
+/// (Req 11.2, 12.1). `createdAt` фиксирует момент загрузки.
+model Attachment {
+  id            String    @id @default(uuid()) @db.Uuid
+  messageId     String?   @db.Uuid // null до привязки к Сообщению (Req 12.1–12.5)
+  taskId        String    @db.Uuid // Задача, в Чат которой загружено Вложение (Req 11.2, 12.1)
+  uploaderId    String?   @db.Uuid // загрузивший Участник; null при hard-delete автора (Req 8.3)
+  originalName  String
+  mimeType      String
+  sizeBytes     BigInt // <= 26214400 (25 МБ) (Req 12.2)
+  storagePath   String // вне веб-корня (Req 19.8)
+  thumbnailPath String? // миниатюра для изображений (Req 12.6)
+  compression   String    @default("zstd") // сжатое хранение (Req 12.8)
+  checksum      String
+  createdAt     DateTime  @default(now()) @db.Timestamptz // момент загрузки
+
+  message  Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  task     Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader User?    @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([messageId])
+  @@index([taskId])
+  @@index([uploaderId])
+}
+
+/// Отметка о прочтении сообщения пользователем (Req 11.8, 14.4).
+model MessageRead {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  userId    String   @db.Uuid
+  readAt    DateTime @default(now()) @db.Timestamptz
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+}
+
+/// Mute уведомлений чата задачи для пользователя (Req 16.9).
+model ChatMute {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  taskId String @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, taskId])
+  @@index([userId])
+  @@index([taskId])
+}
+
+// =========================================================================
+// Журнал изменений и уведомления
+// =========================================================================
+
+/// Неизменяемая запись журнала изменений задачи (append-only) (Req 20).
+model AuditEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  authorId  String?  @db.Uuid // null при hard-delete автора
+  field     String
+  oldValue  String?
+  newValue  String?
+  changedAt DateTime @default(now()) @db.Timestamptz
+
+  task   Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([changedAt])
+}
+
+/// Уведомление, доставляемое на сайт и/или через Бот MAX (Req 13, 14, 15).
+model Notification {
+  id                    String           @id @default(uuid()) @db.Uuid
+  recipientId           String           @db.Uuid
+  taskId                String?          @db.Uuid
+  messageId             String?          @db.Uuid // для уведомлений о сообщениях чата (Req 14.4)
+  type                  NotificationType
+  payload               Json
+  isMessageNotification Boolean          @default(false) // удаляется по просмотру (Req 14.4, 14.5)
+  siteStatus            DeliveryStatus   @default(PENDING)
+  maxStatus             DeliveryStatus   @default(PENDING)
+  maxRetryCount         Int              @default(0)
+  createdAt             DateTime         @default(now()) @db.Timestamptz
+
+  recipient User     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId])
+  @@index([taskId])
+  @@index([messageId])
+  @@index([recipientId, isMessageNotification])
+}
+
+/// Состояние отправки напоминания по порогу дедлайна (Req 13.7–13.10).
+model DeadlineReminder {
+  id        String            @id @default(uuid()) @db.Uuid
+  taskId    String            @db.Uuid
+  threshold ReminderThreshold
+  sent      Boolean           @default(false) // защита от повторной отправки порога
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, threshold])
+  @@index([taskId])
+}
+
+// =========================================================================
+// Резервное копирование
+// =========================================================================
+
+/// Запись о выполнении резервного копирования (Req 21).
+model BackupRecord {
+  id         String       @id @default(uuid()) @db.Uuid
+  startedAt  DateTime     @default(now()) @db.Timestamptz
+  finishedAt DateTime?    @db.Timestamptz
+  result     BackupResult
+  checksum   String? // контрольная сумма копии (Req 21.6)
+  reason     String? // причина пропуска/сбоя (Req 21.8)
+
+  @@index([startedAt])
+  @@index([result])
+}

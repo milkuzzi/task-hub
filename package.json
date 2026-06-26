@@ -1,0 +1,30 @@
+{
+  "name": "task-assignment-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Система поручений — монорепозиторий (backend NestJS, frontend React, prisma)",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "test": "npm --workspace backend run test",
+    "test:unit": "npm --workspace backend run test:unit",
+    "test:e2e": "npm --workspace backend run test:e2e",
+    "lint": "npm --workspace backend run lint",
+    "build": "npm --workspace backend run build",
+    "preview:api": "node scripts/preview-api.cjs",
+    "db:generate": "prisma generate",
+    "db:validate": "DATABASE_URL=${DATABASE_URL:-postgresql://validate:validate@localhost:5432/task_hub_validate} prisma validate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "overrides": {
+    "ws": "8.21.0"
+  },
+  "license": "UNLICENSED"
+}
