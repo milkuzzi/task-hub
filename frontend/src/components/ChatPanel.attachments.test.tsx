@@ -82,16 +82,12 @@ describe("ChatPanel — отправка вложений", () => {
     expect((fileInput as HTMLInputElement).form).toBeNull();
   });
 
-  it("в MAX явно запрашивает выбор любых файлов", () => {
+  it("в MAX не ограничивает системный выбор файлов accept-фильтром", () => {
     renderPanel(vi.fn().mockResolvedValue(undefined), "max");
 
-    const accept = screen.getByLabelText("Прикрепить файл").getAttribute("accept");
-    expect(accept).toContain("*/*");
-    expect(accept).toContain("application/*");
-    expect(accept).toContain("text/*");
-    expect(accept).toContain(".json");
-    expect(accept).toContain(".sig");
-    expect(accept).toContain(".pub");
+    expect(screen.getByLabelText("Прикрепить файл")).not.toHaveAttribute(
+      "accept",
+    );
   });
 
   it.each([

@@ -18,46 +18,6 @@ import {
 } from "@/lib/chat-api";
 import { ChatMessageItem } from "./ChatMessageItem";
 
-const MAX_FILE_ACCEPT = [
-  "*/*",
-  "application/*",
-  "text/*",
-  "image/*",
-  "audio/*",
-  "video/*",
-  ".json",
-  ".sig",
-  ".pub",
-  ".key",
-  ".pem",
-  ".cer",
-  ".crt",
-  ".p7s",
-  ".xml",
-  ".yaml",
-  ".yml",
-  ".txt",
-  ".csv",
-  ".log",
-  ".md",
-  ".bin",
-  ".zip",
-  ".rar",
-  ".7z",
-  ".tar",
-  ".gz",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".ppt",
-  ".pptx",
-  ".odt",
-  ".ods",
-  ".odp",
-  ".pdf",
-].join(",");
-
 /**
  * Панель Чата Задачи: лента Сообщений и форма отправки (Req 11.3–11.8).
  *
@@ -414,7 +374,6 @@ export function ChatPanel({
               className="chat-composer__file-input"
               type="file"
               multiple
-              accept={surface === "max" ? MAX_FILE_ACCEPT : undefined}
               disabled={busy}
               aria-label={t("chat.attachFile")}
               onClick={(event) => {

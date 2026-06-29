@@ -37,7 +37,7 @@ function meta(overrides: Partial<AttachmentMeta> = {}): AttachmentMeta {
 afterEach(() => {
   mockedFetchDocumentPreviewBlob.mockReset();
   mockedOpenAttachment.mockReset();
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe("AttachmentViewer", () => {
@@ -186,5 +186,32 @@ describe("AttachmentViewer", () => {
     expect(frame).toHaveClass("viewer__document-frame");
     expect(frame.getAttribute("src")).toMatch(/^blob:mock\//);
     expect(container.querySelector("iframe")).not.toBeNull();
+  });
+
+  it("не показывает PDF iframe в мобильной MAX mini-app", () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile",
+    );
+
+    const { container } = render(
+      <AttachmentViewer
+        surface="max"
+        attachment={meta({
+          id: "att-mobile-doc",
+          originalName: "report.xlsx",
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        })}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(mockedFetchDocumentPreviewBlob).not.toHaveBeenCalled();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(
+      screen.getByText(
+        "В мобильной версии MAX встроенный просмотр документов недоступен. Скачайте оригинальный файл.",
+      ),
+    ).toBeInTheDocument();
   });
 });

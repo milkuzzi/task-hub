@@ -196,10 +196,10 @@ describe("Operational layout source invariants", () => {
     const css = source("styles/global.css");
 
     expect(css).toMatch(
-      /\.task-form-dialog\s*{[^}]*gap: var\(--space-4\);[^}]*padding: var\(--space-5\);/s,
+      /\.task-form-dialog\s*{[^}]*gap: var\(--space-6\);[^}]*padding: var\(--space-6\);/s,
     );
     expect(css).toMatch(
-      /\.task-form-dialog__form,\s*\.task-form-dialog__content\s*{[^}]*gap: var\(--space-4\);/s,
+      /\.task-form-dialog__form,\s*\.task-form-dialog__content\s*{[^}]*gap: var\(--space-6\);/s,
     );
     expect(css).not.toMatch(
       /\.task-form-dialog\s*{[^}]*gap: 0;[^}]*padding: 0;/s,

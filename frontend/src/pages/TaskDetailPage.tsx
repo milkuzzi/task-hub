@@ -737,6 +737,7 @@ export function TaskDetailPage(): JSX.Element {
 
       <AttachmentViewer
         attachment={viewerAttachment}
+        surface={isMaxApp ? "max" : "site"}
         onClose={() => setViewerAttachment(null)}
       />
       <TaskFormDialog

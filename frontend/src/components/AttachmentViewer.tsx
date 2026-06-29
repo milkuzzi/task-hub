@@ -19,6 +19,26 @@ function usesPdfDocumentPreview(previewKind: AttachmentPreviewKind): boolean {
   );
 }
 
+function isLikelyMobileMaxWebView(surface: "site" | "max"): boolean {
+  if (surface !== "max" || typeof navigator === "undefined") {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent.toLowerCase();
+  if (/android|iphone|ipad|ipod|mobile/.test(userAgent)) {
+    return true;
+  }
+
+  if (typeof window === "undefined" || window.matchMedia === undefined) {
+    return false;
+  }
+
+  return (
+    window.matchMedia("(pointer: coarse)").matches &&
+    window.matchMedia("(max-width: 820px)").matches
+  );
+}
+
 /**
  * Полноэкранный просмотр Вложения с распаковкой на клиенте (Req 12.9).
  *
@@ -35,11 +55,14 @@ function usesPdfDocumentPreview(previewKind: AttachmentPreviewKind): boolean {
 export interface AttachmentViewerProps {
   /** Просматриваемое Вложение или `null`, если просмотр закрыт. */
   attachment: AttachmentMeta | null;
+  /** Визуальная среда: обычный сайт или MAX mini-app. */
+  surface?: "site" | "max";
   onClose: () => void;
 }
 
 export function AttachmentViewer({
   attachment,
+  surface = "site",
   onClose,
 }: AttachmentViewerProps): JSX.Element | null {
   const { t } = useTranslation();
@@ -74,6 +97,10 @@ export function AttachmentViewer({
 
     if (previewKind === "download") {
       // Предпросмотр недоступен — предложим скачивание (Req 12.7).
+      return;
+    }
+
+    if (usesPdfDocumentPreview(previewKind) && isLikelyMobileMaxWebView(surface)) {
       return;
     }
 
@@ -134,13 +161,16 @@ export function AttachmentViewer({
         revoke();
       }
     };
-  }, [attachment, t]);
+  }, [attachment, surface, t]);
 
   if (attachment === null) {
     return null;
   }
 
   const previewKind = attachmentPreviewKind(attachment);
+  const documentPreview = usesPdfDocumentPreview(previewKind);
+  const maxMobileDocumentFallback =
+    documentPreview && isLikelyMobileMaxWebView(surface);
 
   /**
    * Скачивает Вложение через авторизованный клиент с распаковкой на стороне
@@ -156,7 +186,7 @@ export function AttachmentViewer({
     setDownloading(true);
     let revoke: (() => void) | null = null;
     try {
-      let href = usesPdfDocumentPreview(previewKind) ? null : url;
+      let href = documentPreview ? null : url;
       if (href === null) {
         const result = await openAttachment(attachment);
         href = result.url;
@@ -216,7 +246,7 @@ export function AttachmentViewer({
 
         <div
           className={
-            usesPdfDocumentPreview(previewKind)
+            documentPreview
               ? "viewer__body viewer__body--document"
               : "viewer__body"
           }
@@ -252,7 +282,25 @@ export function AttachmentViewer({
               preload="metadata"
             />
           )}
-          {usesPdfDocumentPreview(previewKind) && url !== null && (
+          {maxMobileDocumentFallback && error === null && (
+            <div className="viewer__document-fallback">
+              <p className="text-muted">
+                {t("attachment.viewer.maxMobileDocumentUnsupported")}
+              </p>
+              <button
+                className="btn btn--primary"
+                type="button"
+                disabled={downloading}
+                aria-busy={downloading}
+                onClick={() => void handleDownload()}
+              >
+                {downloading
+                  ? t("attachment.viewer.loading")
+                  : t("attachment.download")}
+              </button>
+            </div>
+          )}
+          {documentPreview && !maxMobileDocumentFallback && url !== null && (
             <iframe
               className="viewer__document-frame"
               src={url}
