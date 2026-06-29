@@ -121,6 +121,12 @@ export class BackupService {
    */
   private async performBackup(signal: AbortSignal): Promise<DatabaseDumpResult> {
     const dump = await this.restic.createDump(signal); // Req 21.1, 21.2
+    if (this.offsite.isConfigured?.() === false) {
+      this.logger.warn(
+        'S3-манифест резервной копии не сконфигурирован; restic-снимок создан без внешнего манифеста.',
+      );
+      return dump;
+    }
     await this.offsite.upload(dump, signal); // Req 21.4
     return dump;
   }

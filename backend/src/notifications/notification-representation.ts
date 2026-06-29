@@ -1,4 +1,11 @@
-import { DeliveryStatus, Notification, NotificationType } from '@prisma/client';
+import {
+  AssignmentKind,
+  DeliveryStatus,
+  Notification,
+  NotificationType,
+  ReminderThreshold,
+  TaskStatus,
+} from '@prisma/client';
 
 type NotificationSource = Notification & { task?: { title: string } | null };
 
@@ -130,6 +137,25 @@ const BODY_MAP: Record<FrontendNotificationType, string> = {
   NEW_MESSAGE: 'В чате задачи появилось новое сообщение.',
 };
 
+const ASSIGNMENT_KIND_LABELS: Record<AssignmentKind, string> = {
+  [AssignmentKind.EXECUTOR]: 'исполнитель',
+  [AssignmentKind.MANAGER]: 'менеджер',
+};
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  [TaskStatus.IN_PROGRESS]: 'В работе',
+  [TaskStatus.WAITING]: 'Ожидает',
+  [TaskStatus.DONE]: 'Выполнено',
+  [TaskStatus.NEEDS_ADMIN]: 'Требует администратора',
+  [TaskStatus.CANCELLED]: 'Отменено',
+};
+
+const TASK_FIELD_LABELS: Record<string, string> = {
+  title: 'название',
+  description: 'описание',
+  deadline: 'дедлайн',
+};
+
 /** Приводит доменный {@link NotificationType} к типу фронтенда (Req 13, 14, 15). */
 export function toFrontendType(type: NotificationType): FrontendNotificationType {
   return TYPE_MAP[type];
@@ -140,17 +166,144 @@ export function toFrontendDeliveryStatus(status: DeliveryStatus): FrontendDelive
   return DELIVERY_STATUS_MAP[status];
 }
 
-function payloadTaskTitle(notification: Notification): string | null {
+type PayloadRecord = Record<string, unknown>;
+
+function payloadRecord(notification: Notification): PayloadRecord {
   const payload = notification.payload;
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    return null;
+    return {};
   }
-  const value = (payload as Record<string, unknown>).taskTitle;
-  return typeof value === 'string' && value.trim() !== '' ? value : null;
+  return payload as PayloadRecord;
 }
 
-function notificationBody(notification: NotificationSource, type: FrontendNotificationType): string {
-  return notification.task?.title ?? payloadTaskTitle(notification) ?? BODY_MAP[type];
+function payloadString(payload: PayloadRecord, key: string): string | null {
+  const value = payload[key];
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function taskTitle(notification: NotificationSource, payload: PayloadRecord): string | null {
+  return notification.task?.title ?? payloadString(payload, 'taskTitle');
+}
+
+function quotedTask(title: string | null): string {
+  return title === null ? 'Задача без загруженного названия' : `Задача «${title}»`;
+}
+
+function assignmentKind(payload: PayloadRecord): string {
+  const kind = payloadString(payload, 'kind');
+  if (kind === AssignmentKind.EXECUTOR || kind === AssignmentKind.MANAGER) {
+    return ASSIGNMENT_KIND_LABELS[kind];
+  }
+  return 'участник';
+}
+
+function statusLabel(payload: PayloadRecord): string | null {
+  const status = payloadString(payload, 'status');
+  if (status !== null && status in TASK_STATUS_LABELS) {
+    return TASK_STATUS_LABELS[status as TaskStatus];
+  }
+  return status;
+}
+
+function changedFieldLabels(payload: PayloadRecord): string {
+  const value = payload.changedFields;
+  if (!Array.isArray(value)) {
+    return 'параметры задачи';
+  }
+  const labels = value
+    .filter((field): field is string => typeof field === 'string' && field.trim() !== '')
+    .map((field) => TASK_FIELD_LABELS[field] ?? field);
+  if (labels.length === 0) {
+    return 'параметры задачи';
+  }
+  return labels.join(', ');
+}
+
+function deadlineThreshold(notification: Notification, payload: PayloadRecord): string {
+  const threshold = payloadString(payload, 'threshold');
+  if (
+    threshold === ReminderThreshold.NEAR ||
+    notification.type === NotificationType.DEADLINE_REMINDER_NEAR
+  ) {
+    return 'ближний порог напоминания';
+  }
+  if (
+    threshold === ReminderThreshold.FAR ||
+    notification.type === NotificationType.DEADLINE_REMINDER_FAR
+  ) {
+    return 'дальний порог напоминания';
+  }
+  return 'порог напоминания';
+}
+
+function roleChangeBody(notification: Notification, payload: PayloadRecord): string {
+  if (notification.type === NotificationType.MANAGER_ROLE_CHANGED) {
+    if (payload.assigned === true) {
+      return 'Вам назначена роль Менеджера. Доступны задачи, где вы указаны менеджером, и действия по управлению такими задачами.';
+    }
+    if (payload.assigned === false) {
+      return 'С вас снята роль Менеджера. Управление задачами Менеджера больше недоступно, если нет отдельного назначения.';
+    }
+  }
+  if (notification.type === NotificationType.ADMIN_TRANSFER) {
+    return 'Изменены права Администратора. Проверьте актуальную роль и доступные разделы системы.';
+  }
+  if (notification.type === NotificationType.ACCOUNT_REGISTRATION) {
+    return 'Для вашей учётной записи создано приглашение или завершена регистрация. Доступ зависит от текущей роли пользователя.';
+  }
+  return BODY_MAP.ROLE_CHANGED;
+}
+
+function notificationBody(
+  notification: NotificationSource,
+  type: FrontendNotificationType,
+): string {
+  const payload = payloadRecord(notification);
+  const task = quotedTask(taskTitle(notification, payload));
+
+  switch (notification.type) {
+    case NotificationType.TASK_ASSIGNED:
+      return `${task}. Вас назначили на задачу как ${assignmentKind(payload)}.`;
+    case NotificationType.TASK_UNASSIGNED:
+      return `${task}. Вас сняли с участия в задаче.`;
+    case NotificationType.TASK_FIELD_CHANGED:
+      return `${task}. Изменены поля: ${changedFieldLabels(payload)}.`;
+    case NotificationType.TASK_STATUS_CHANGED: {
+      const status = statusLabel(payload);
+      return status === null
+        ? `${task}. Статус задачи изменён.`
+        : `${task}. Новый статус: «${status}».`;
+    }
+    case NotificationType.TASK_REOPENED:
+      return `${task}. Задача переоткрыта и снова требует работы.`;
+    case NotificationType.TASK_CANCELLED:
+      return `${task}. Задача отменена.`;
+    case NotificationType.TASK_RETURNED:
+      return `${task}. Задача возвращена из отменённых в работу.`;
+    case NotificationType.DEADLINE_REMINDER_FAR:
+    case NotificationType.DEADLINE_REMINDER_NEAR:
+      return `${task}. Приближается дедлайн: ${deadlineThreshold(notification, payload)}.`;
+    case NotificationType.CHAT_MESSAGE: {
+      const authorDisplayName = payloadString(payload, 'authorDisplayName');
+      if (authorDisplayName !== null) {
+        return `${task}. В чате задачи опубликовано новое сообщение от ${authorDisplayName}.`;
+      }
+      const authorId = payloadString(payload, 'authorId');
+      return authorId === null
+        ? `${task}. В чате задачи опубликовано новое сообщение.`
+        : `${task}. В чате задачи опубликовано новое сообщение от участника ${authorId}.`;
+    }
+    case NotificationType.MANAGER_ROLE_CHANGED:
+    case NotificationType.ADMIN_TRANSFER:
+    case NotificationType.ACCOUNT_REGISTRATION:
+      return roleChangeBody(notification, payload);
+    default:
+      return BODY_MAP[type];
+  }
 }
 
 /**

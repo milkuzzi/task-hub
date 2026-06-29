@@ -15,8 +15,7 @@ import { RateLimitGuard } from './rate-limit.guard';
  *
  * Интеграция (задача 17.1): операция отправки Сообщения (`send_message`)
  * ограничивается напрямую в {@link ChatService.sendMessage} (источник —
- * отправитель), что покрывает как web-путь (Socket.IO/ChatService), так и Бот
- * MAX (`MaxBotService.sendMessageFromBot` делегирует тому же методу). Операции с
+ * отправитель), что покрывает web и mini-app пути через единый ChatService. Операции с
  * HTTP-обработчиками (`login`, `set_password`, `change_password`, `upload`)
  * помечаются декоратором `@RateLimit(op)` и закрываются {@link RateLimitGuard};
  * фактическая навеска guard'а выполняется вместе с появлением соответствующих

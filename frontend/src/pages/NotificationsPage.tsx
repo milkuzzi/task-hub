@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { resolveErrorMessage } from '@/lib/error-message';
 import { connectSocket, ChatEvents } from '@/lib/socket';
 import {
@@ -12,6 +13,7 @@ import { NotificationItem } from '@/components/NotificationItem';
 import { EmptyState } from '@/components/EmptyState';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
+import { useAppPath } from '@/lib/app-path';
 
 /**
  * Центр уведомлений (задача 20.6, Req 13, 14).
@@ -32,6 +34,8 @@ function byCreatedDesc(a: AppNotification, b: AppNotification): number {
 
 export function NotificationsPage(): JSX.Element {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const appPath = useAppPath();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +141,7 @@ export function NotificationsPage(): JSX.Element {
               notification={n}
               onSeen={handleSeen}
               onDismiss={handleDismiss}
+              onOpen={(taskId) => navigate(appPath(`/tasks/${taskId}`))}
             />
           ))}
         </ul>

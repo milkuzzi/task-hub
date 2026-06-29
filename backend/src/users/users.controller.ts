@@ -12,12 +12,14 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { Role } from '@prisma/client';
 import {
   AccessDeniedException,
   EntityNotFoundException,
   ValidationException,
 } from '../common/errors';
+import { readSingleMultipartFile } from '../common/http';
 import { AuthService, SessionAuthGuard, AuthenticatedRequest } from '../auth';
 import { ClockService } from '../clock';
 import { UserRepository } from '../repositories';
@@ -31,9 +33,13 @@ import {
 } from './user-representation';
 import { UsersService } from './users.service';
 import { InviteUserDto, RestoreUserDto, UpdateUserDto } from './dto';
+import { UploadedFile as ProfileUploadedFile } from './profile.types';
 
 /** Режим удаления Пользователя (Req 8.1). */
 type DeleteMode = 'soft' | 'hard';
+
+/** Единый лимит размера аватара — 5 МБ. */
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * HTTP-слой администрирования Пользователей (Req 2, 3, 5, 6, 7, 8).
@@ -157,6 +163,32 @@ export class UsersController {
       patch.displayName = dto.name;
     }
     await this.usersService.updateProfile(this.principal(req).userId, id, patch);
+    return this.toAdminUserById(id);
+  }
+
+  /**
+   * Изменение аватара выбранного Пользователя Администратором.
+   *
+   * Поле формы — `avatar`. Авторитетные проверки прав, формата и размера
+   * выполняет {@link UsersService.setAvatar}; контроллер только преобразует
+   * multipart-файл в доменный тип и возвращает обновлённую запись списка.
+   */
+  @Post(':id/avatar')
+  async uploadAvatar(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AdminUserView> {
+    const file = await readSingleMultipartFile(req as unknown as FastifyRequest, {
+      fieldName: 'avatar',
+      maxBytes: AVATAR_MAX_BYTES,
+    });
+    const uploaded: ProfileUploadedFile = {
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+      sizeBytes: file.size,
+      buffer: file.buffer,
+    };
+    await this.usersService.setAvatar(this.principal(req).userId, id, uploaded);
     return this.toAdminUserById(id);
   }
 

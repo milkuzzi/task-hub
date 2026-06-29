@@ -11,8 +11,12 @@
     "test": "npm --workspace backend run test",
     "test:unit": "npm --workspace backend run test:unit",
     "test:e2e": "npm --workspace backend run test:e2e",
+    "test:frontend": "npm --workspace frontend run test",
+    "test:e2e:frontend": "npm --workspace frontend run test:e2e",
     "lint": "npm --workspace backend run lint",
     "build": "npm --workspace backend run build",
+    "qa:release": "npm audit && npm run db:validate && npm --workspace backend run lint && npm --workspace backend run build && npm --workspace backend run test:unit && npm --workspace backend run test:e2e && npm --workspace frontend run lint && npm --workspace frontend run build && npm --workspace frontend run test && npm --workspace frontend run test:smoke",
+    "smoke:release": "bash scripts/release-smoke.sh",
     "preview:api": "node scripts/preview-api.cjs",
     "db:generate": "prisma generate",
     "db:validate": "DATABASE_URL=${DATABASE_URL:-postgresql://validate:validate@localhost:5432/task_hub_validate} prisma validate --schema prisma/schema.prisma",
@@ -24,7 +28,10 @@
     "schema": "prisma/schema.prisma"
   },
   "overrides": {
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "4.3.0"
+    }
   },
   "license": "UNLICENSED"
 }

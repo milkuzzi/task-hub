@@ -1,12 +1,24 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Task } from '@prisma/client';
+import {
+  Body,
+  Controller,
+  Get,
+  Logger,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { AssignmentKind, Role } from '@prisma/client';
 import { AccessDeniedException } from '../common/errors';
 import { Page } from '../common/dto';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { ClockService } from '../clock';
-import { TaskWithAssignments } from '../repositories';
+import { TaskWithAssignments, UserRepository } from '../repositories';
 import { SearchQuery, SearchService, TaskFilters } from '../search';
 import { Status, StatusAction } from '../status';
+import { TaskRealtimeDispatcher, TaskRealtimeReason } from './task-realtime.dispatcher';
 import { TasksService } from './tasks.service';
 import {
   AssignmentDto,
@@ -32,10 +44,14 @@ import { TaskCardView, TaskDetailView, toTaskCard, toTaskDetail } from './task-r
 @Controller('tasks')
 @UseGuards(SessionAuthGuard)
 export class TasksController {
+  private readonly logger = new Logger(TasksController.name);
+
   constructor(
     private readonly tasksService: TasksService,
     private readonly searchService: SearchService,
     private readonly clock: ClockService,
+    private readonly userRepository: UserRepository,
+    private readonly taskRealtime: TaskRealtimeDispatcher,
   ) {}
 
   /**
@@ -77,7 +93,9 @@ export class TasksController {
   ): Promise<TaskDetailView> {
     const userId = this.principal(req).userId;
     const created = await this.tasksService.create(userId, dto);
-    return this.toDetail(userId, await this.tasksService.getVisibleTask(userId, created.id));
+    const task = await this.tasksService.getVisibleTask(userId, created.id);
+    void this.emitTaskUpdated(task, 'created', [userId]);
+    return this.toDetail(userId, task);
   }
 
   /**
@@ -92,7 +110,9 @@ export class TasksController {
   ): Promise<TaskDetailView> {
     const userId = this.principal(req).userId;
     await this.tasksService.update(userId, id, dto);
-    return this.toDetail(userId, await this.tasksService.getVisibleTask(userId, id));
+    const task = await this.tasksService.getVisibleTask(userId, id);
+    void this.emitTaskUpdated(task, 'updated', [userId]);
+    return this.toDetail(userId, task);
   }
 
   /**
@@ -106,7 +126,9 @@ export class TasksController {
     @Req() req: AuthenticatedRequest,
   ): Promise<TaskDetailView> {
     const userId = this.principal(req).userId;
+    const previous = await this.tasksService.getVisibleTask(userId, id);
     const task = await this.tasksService.assign(userId, id, dto);
+    void this.emitTaskUpdated(task, 'assigned', [userId, ...this.participantIds(previous)]);
     return this.toDetail(userId, task);
   }
 
@@ -123,6 +145,7 @@ export class TasksController {
   ): Promise<TaskDetailView> {
     const userId = this.principal(req).userId;
     const task = await this.tasksService.changeStatus(userId, id, this.toStatusAction(dto.action));
+    void this.emitTaskUpdated(task, 'status', [userId]);
     return this.toDetail(userId, task);
   }
 
@@ -147,6 +170,9 @@ export class TasksController {
     if (dto.participantIds !== undefined && dto.participantIds.length > 0) {
       filters.participantIds = dto.participantIds;
     }
+    if (dto.assignmentKind !== undefined) {
+      filters.assignmentKind = dto.assignmentKind;
+    }
 
     const query: SearchQuery = {};
     if (dto.text !== undefined) {
@@ -160,6 +186,12 @@ export class TasksController {
     }
     if (dto.pageSize !== undefined) {
       query.pageSize = dto.pageSize;
+    }
+    if (dto.sortBy !== undefined) {
+      query.sortBy = dto.sortBy;
+    }
+    if (dto.sortDirection !== undefined) {
+      query.sortDirection = dto.sortDirection;
     }
     return query;
   }
@@ -178,7 +210,7 @@ export class TasksController {
   }
 
   /** Формирует карточку Задачи: насыщенный счётчик и маркер непрочитанного (Req 9.7–9.9). */
-  private async toCard(userId: string, task: Task): Promise<TaskCardView> {
+  private async toCard(userId: string, task: TaskWithAssignments): Promise<TaskCardView> {
     const messageCount = this.tasksService.saturateMessageCount(task.messageCount);
     const hasUnread = await this.tasksService.hasUnread(userId, task.id);
     return toTaskCard(task, messageCount, hasUnread, this.clock.now());
@@ -189,6 +221,41 @@ export class TasksController {
     const messageCount = this.tasksService.saturateMessageCount(task.messageCount);
     const hasUnread = await this.tasksService.hasUnread(userId, task.id);
     return toTaskDetail(task, messageCount, hasUnread, this.clock.now());
+  }
+
+  /** Доставляет лёгкое realtime-событие об изменении Задачи затронутым Пользователям. */
+  private async emitTaskUpdated(
+    task: TaskWithAssignments,
+    reason: TaskRealtimeReason,
+    extraUserIds: readonly string[] = [],
+  ): Promise<void> {
+    try {
+      const admins = await this.userRepository.listActiveWithMaxLink();
+      const adminIds = admins.filter((user) => user.role === Role.ADMIN).map((user) => user.id);
+      const recipientIds = [
+        ...new Set([...this.participantIds(task), ...adminIds, ...extraUserIds]),
+      ];
+      this.taskRealtime.pushTaskUpdated(task.id, reason, recipientIds);
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось отправить realtime-событие изменения Задачи «${task.id}»: ${String(error)}`,
+      );
+    }
+  }
+
+  /** Возвращает уникальные идентификаторы назначенных участников Задачи. */
+  private participantIds(task: TaskWithAssignments): string[] {
+    return [
+      ...new Set(
+        task.assignments
+          .filter(
+            (assignment) =>
+              assignment.kind === AssignmentKind.EXECUTOR ||
+              assignment.kind === AssignmentKind.MANAGER,
+          )
+          .map((assignment) => assignment.userId),
+      ),
+    ];
   }
 
   /** Возвращает аутентифицированный субъект запроса, установленный guard-ом. */

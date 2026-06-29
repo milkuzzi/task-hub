@@ -458,6 +458,18 @@ describe('AuthService (Req 5)', () => {
       expect(result).toBe(issuedSession);
     });
 
+    it('передаёт redirectUri в порт обмена OAuth MAX', async () => {
+      exchangeAuthCode.mockResolvedValue('max-123');
+      findActiveUserByMaxUserId.mockResolvedValue({ ...activeUser });
+
+      await service.loginWithMax('auth-code', 'https://tasks.example.test/auth/max/callback');
+
+      expect(exchangeAuthCode).toHaveBeenCalledWith(
+        'auth-code',
+        'https://tasks.example.test/auth/max/callback',
+      );
+    });
+
     it('отклоняет вход, если профиль MAX не привязан ни к одному пользователю (Req 16.3)', async () => {
       exchangeAuthCode.mockResolvedValue('max-unknown');
       findActiveUserByMaxUserId.mockResolvedValue(null);

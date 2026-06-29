@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { listNotifications, markNotificationSeen } from '@/lib/notifications-api';
 import { connectSocket } from '@/lib/socket';
 import { NotificationsPage } from './NotificationsPage';
@@ -109,7 +110,11 @@ describe('NotificationsPage message cleanup', () => {
       },
     ]);
 
-    render(<NotificationsPage />);
+    render(
+      <MemoryRouter>
+        <NotificationsPage />
+      </MemoryRouter>,
+    );
 
     expect(await screen.findByText('Первое сообщение')).toBeInTheDocument();
     expect(screen.getByText('Второе сообщение')).toBeInTheDocument();

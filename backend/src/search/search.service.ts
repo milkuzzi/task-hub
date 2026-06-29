@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, Task, TaskStatus } from '@prisma/client';
+import { Prisma, TaskStatus } from '@prisma/client';
 import { AccessDeniedException } from '../common/errors';
 import { Page, PAGINATION, PaginationQueryDto } from '../common/dto';
-import { TaskRepository, UserRepository } from '../repositories';
+import { TaskRepository, TaskWithAssignments, UserRepository } from '../repositories';
 import { buildSearchWhere, validateSearchQuery } from './search-query';
-import { SearchQuery } from './search.types';
+import { NormalizedSearchQuery, SearchQuery } from './search.types';
 
 /**
  * Прикладной сервис поиска, фильтрации и пагинации Задач (Req 18).
@@ -55,7 +55,7 @@ export class SearchService {
    * @throws ValidationException Недопустима строка запроса (Req 18.2) или
    *   значение фильтра (Req 18.4, 18.7).
    */
-  async search(userId: string, query: SearchQuery): Promise<Page<Task>> {
+  async search(userId: string, query: SearchQuery): Promise<Page<TaskWithAssignments>> {
     const actor = await this.userRepository.findActiveById(userId);
     if (actor === null) {
       throw new AccessDeniedException('Учётная запись не найдена или удалена.');
@@ -73,7 +73,20 @@ export class SearchService {
       normalized.filters?.statuses?.includes(TaskStatus.CANCELLED) ?? false;
     const listWhere = requestedCancelled ? where : this.withoutCancelled(where);
 
-    return this.taskRepository.list(pagination, listWhere);
+    return this.taskRepository.list(pagination, listWhere, this.resolveOrderBy(normalized));
+  }
+
+  /** Строит стабильный порядок, применяемый в БД до постраничной выборки. */
+  private resolveOrderBy(query: NormalizedSearchQuery): Prisma.TaskOrderByWithRelationInput[] {
+    const direction = query.sortDirection;
+    switch (query.sortBy) {
+      case 'status':
+        return [{ status: direction }, { deadline: 'asc' }, { id: 'asc' }];
+      case 'title':
+        return [{ title: direction }, { deadline: 'asc' }, { id: 'asc' }];
+      case 'deadline':
+        return [{ deadline: direction }, { createdAt: 'desc' }, { id: 'asc' }];
+    }
   }
 
   private withoutCancelled(where: Prisma.TaskWhereInput): Prisma.TaskWhereInput {

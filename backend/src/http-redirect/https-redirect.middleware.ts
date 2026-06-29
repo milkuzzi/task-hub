@@ -1,6 +1,20 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
-import { NextFunction, Request, Response } from 'express';
 import { buildHttpsRedirectUrl, isSecureRequest } from './https-redirect.util';
+
+interface RedirectRequest {
+  protocol?: string;
+  originalUrl: string;
+  headers: {
+    host?: string | undefined;
+    'x-forwarded-proto'?: string | string[] | undefined;
+  };
+}
+
+interface RedirectResponse {
+  redirect(statusCode: number, url: string): void;
+}
+
+type NextFunction = () => void;
 
 /**
  * Middleware перенаправления HTTP→HTTPS (Req 1.3, 1.4).
@@ -14,7 +28,7 @@ import { buildHttpsRedirectUrl, isSecureRequest } from './https-redirect.util';
  */
 @Injectable()
 export class HttpsRedirectMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: NextFunction): void {
+  use(req: RedirectRequest, res: RedirectResponse, next: NextFunction): void {
     const forwardedProtoHeader = req.headers['x-forwarded-proto'];
     const forwardedProto = Array.isArray(forwardedProtoHeader)
       ? forwardedProtoHeader[0]

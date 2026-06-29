@@ -1,6 +1,6 @@
-import { api } from './api';
-import type { UserRole } from './auth-api';
-import type { TaskDetail, TaskStatus } from './tasks-api';
+import { api } from "./api";
+import type { UserRole } from "./auth-api";
+import type { TaskDetail, TaskStatus } from "./tasks-api";
 
 /**
  * Действия смены Статуса и клиентское зеркало конечного автомата (Req 10).
@@ -14,7 +14,7 @@ import type { TaskDetail, TaskStatus } from './tasks-api';
  */
 
 /** Роль действующего лица в контексте Задачи (зеркалит серверный `Actor`). */
-export type Actor = 'EXECUTOR' | 'MANAGER' | 'ADMIN';
+export type Actor = "EXECUTOR" | "MANAGER" | "ADMIN";
 
 /**
  * Явное действие смены Статуса (зеркалит серверный `StatusAction`).
@@ -23,23 +23,27 @@ export type Actor = 'EXECUTOR' | 'MANAGER' | 'ADMIN';
  * администратора» (Req 10.9).
  */
 export type StatusAction =
-  | { type: 'COMPLETE' } // Пометить «Выполнено» (Req 10.4)
-  | { type: 'REOPEN' } // Переоткрыть из «Выполнено» (Req 10.5)
-  | { type: 'CANCEL' } // Отменить (Req 10.6)
-  | { type: 'RETURN' } // Вернуть из «Отменено» (Req 10.7)
-  | { type: 'REQUEST_ADMIN' } // Запросить «Требует администратора» (Req 10.8)
-  | { type: 'ADMIN_SET'; target: TaskStatus } // Администратор выбирает Статус (Req 10.9)
-  | { type: 'CLEAR_ADMIN' }; // Менеджер снимает «Требует администратора» (Req 10.10)
+  | { type: "COMPLETE" } // Пометить «Выполнено» (Req 10.4)
+  | { type: "START_WORK" } // Вернуть из «Ожидает» в «В работе»
+  | { type: "REOPEN" } // Переоткрыть из «Выполнено» (Req 10.5)
+  | { type: "CANCEL" } // Отменить (Req 10.6)
+  | { type: "RETURN" } // Вернуть из «Отменено» (Req 10.7)
+  | { type: "REQUEST_ADMIN" } // Запросить «Требует администратора» (Req 10.8)
+  | { type: "ADMIN_SET"; target: TaskStatus } // Администратор выбирает Статус (Req 10.9)
+  | { type: "CLEAR_ADMIN" }; // Менеджер снимает «Требует администратора» (Req 10.10)
 
 /** Статусы, которые сообщение в Чат делает реактивными (Req 10.1, 10.2). */
-const CHAT_REACTIVE_STATUSES: readonly TaskStatus[] = ['IN_PROGRESS', 'WAITING'];
+const CHAT_REACTIVE_STATUSES: readonly TaskStatus[] = [
+  "IN_PROGRESS",
+  "WAITING",
+];
 
 /** Набор Статусов, выбираемых Администратором из «Требует администратора» (Req 10.9). */
 export const ADMIN_SELECTABLE_TARGETS: readonly TaskStatus[] = [
-  'IN_PROGRESS',
-  'WAITING',
-  'DONE',
-  'CANCELLED',
+  "IN_PROGRESS",
+  "WAITING",
+  "DONE",
+  "CANCELLED",
 ];
 
 /**
@@ -55,29 +59,32 @@ export const ADMIN_SELECTABLE_TARGETS: readonly TaskStatus[] = [
 export function resolveActor(
   role: UserRole,
   userId: string,
-  task: Pick<TaskDetail, 'managerIds' | 'executorIds'>,
+  task: Pick<TaskDetail, "managerIds" | "executorIds">,
 ): Actor | null {
-  if (role === 'ADMIN') {
-    return 'ADMIN';
+  if (role === "ADMIN") {
+    return "ADMIN";
   }
   if (task.managerIds.includes(userId)) {
-    return 'MANAGER';
+    return "MANAGER";
   }
   if (task.executorIds.includes(userId)) {
-    return 'EXECUTOR';
+    return "EXECUTOR";
   }
   return null;
 }
 
 /** Проверяет право роли на действие (зеркалит `StatusMachine.hasPermission`, Req 10.14). */
 function hasPermission(action: StatusAction, actor: Actor): boolean {
-  if (actor === 'EXECUTOR') {
+  if (actor === "EXECUTOR") {
     return false;
   }
-  if (action.type === 'ADMIN_SET' || action.type === 'CANCEL') {
-    return actor === 'ADMIN';
+  if (action.type === "ADMIN_SET" || action.type === "CANCEL") {
+    return actor === "ADMIN";
   }
-  return actor === 'MANAGER' || actor === 'ADMIN';
+  if (action.type === "REQUEST_ADMIN") {
+    return actor === "MANAGER";
+  }
+  return actor === "MANAGER" || actor === "ADMIN";
 }
 
 /**
@@ -90,27 +97,32 @@ function resolveTarget(
   reviewedFlag: boolean,
 ): TaskStatus | null {
   switch (action.type) {
-    case 'COMPLETE':
-      return current === 'IN_PROGRESS' || current === 'WAITING' ? 'DONE' : null;
-    case 'REOPEN':
-      return current === 'DONE' ? 'IN_PROGRESS' : null;
-    case 'CANCEL':
-      return current === 'IN_PROGRESS' ||
-        current === 'WAITING' ||
-        current === 'DONE' ||
-        current === 'NEEDS_ADMIN'
-        ? 'CANCELLED'
+    case "COMPLETE":
+      return current === "IN_PROGRESS" || current === "WAITING" ? "DONE" : null;
+    case "START_WORK":
+      return current === "WAITING" ? "IN_PROGRESS" : null;
+    case "REOPEN":
+      return current === "DONE" ? "IN_PROGRESS" : null;
+    case "CANCEL":
+      return current === "IN_PROGRESS" ||
+        current === "WAITING" ||
+        current === "DONE" ||
+        current === "NEEDS_ADMIN"
+        ? "CANCELLED"
         : null;
-    case 'RETURN':
-      return current === 'CANCELLED' ? 'IN_PROGRESS' : null;
-    case 'REQUEST_ADMIN':
-      return current === 'IN_PROGRESS' || current === 'WAITING' ? 'NEEDS_ADMIN' : null;
-    case 'ADMIN_SET':
-      return current === 'NEEDS_ADMIN' && ADMIN_SELECTABLE_TARGETS.includes(action.target)
+    case "RETURN":
+      return current === "CANCELLED" ? "IN_PROGRESS" : null;
+    case "REQUEST_ADMIN":
+      return current === "IN_PROGRESS" || current === "WAITING"
+        ? "NEEDS_ADMIN"
+        : null;
+    case "ADMIN_SET":
+      return current === "NEEDS_ADMIN" &&
+        ADMIN_SELECTABLE_TARGETS.includes(action.target)
         ? action.target
         : null;
-    case 'CLEAR_ADMIN':
-      return current === 'NEEDS_ADMIN' && !reviewedFlag ? 'IN_PROGRESS' : null;
+    case "CLEAR_ADMIN":
+      return current === "NEEDS_ADMIN" && !reviewedFlag ? "IN_PROGRESS" : null;
     default:
       return null;
   }
@@ -126,17 +138,21 @@ export function canTransition(
   actor: Actor,
   reviewedFlag = false,
 ): boolean {
-  return hasPermission(action, actor) && resolveTarget(current, action, reviewedFlag) !== null;
+  return (
+    hasPermission(action, actor) &&
+    resolveTarget(current, action, reviewedFlag) !== null
+  );
 }
 
 /** Кандидаты действий, не несущие параметров (без `ADMIN_SET`). */
 const SIMPLE_ACTIONS: readonly StatusAction[] = [
-  { type: 'COMPLETE' },
-  { type: 'REOPEN' },
-  { type: 'CANCEL' },
-  { type: 'RETURN' },
-  { type: 'REQUEST_ADMIN' },
-  { type: 'CLEAR_ADMIN' },
+  { type: "COMPLETE" },
+  { type: "START_WORK" },
+  { type: "REOPEN" },
+  { type: "CANCEL" },
+  { type: "RETURN" },
+  { type: "REQUEST_ADMIN" },
+  { type: "CLEAR_ADMIN" },
 ];
 
 /**
@@ -159,9 +175,9 @@ export function availableStatusActions(
       actions.push(action);
     }
   }
-  if (current === 'NEEDS_ADMIN' && actor === 'ADMIN') {
+  if (current === "NEEDS_ADMIN" && actor === "ADMIN") {
     for (const target of ADMIN_SELECTABLE_TARGETS) {
-      actions.push({ type: 'ADMIN_SET', target });
+      actions.push({ type: "ADMIN_SET", target });
     }
   }
   return actions;
@@ -179,8 +195,13 @@ export interface ChangeStatusBody {
  * ошибку `NO_PERMISSION`/`INVALID_TRANSITION` (Req 10.14, 10.15), а Статус не
  * изменится. Возвращается актуальная Задача с новым Статусом.
  */
-export function changeStatus(taskId: string, action: StatusAction): Promise<TaskDetail> {
-  return api.post<TaskDetail>(`/tasks/${taskId}/status`, { action } satisfies ChangeStatusBody);
+export function changeStatus(
+  taskId: string,
+  action: StatusAction,
+): Promise<TaskDetail> {
+  return api.post<TaskDetail>(`/tasks/${taskId}/status`, {
+    action,
+  } satisfies ChangeStatusBody);
 }
 
 /**

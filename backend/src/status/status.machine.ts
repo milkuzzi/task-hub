@@ -112,8 +112,9 @@ export class StatusMachine {
    * - Исполнитель не имеет прав на ручную смену статуса — любое действие
    *   отклоняется.
    * - `ADMIN_SET` и отмена Задачи доступны только Администратору.
-   * - Прочие действия доступны Менеджеру и Администратору (Req 10.4, 10.5, 10.7, 10.8, 10.10);
-   *   Администратор обладает всеми правами Менеджера (Req 2.3).
+   * - `REQUEST_ADMIN` доступен только Менеджеру: Администратор не назначает
+   *   вручную статус «Требует администратора».
+   * - Прочие действия доступны Менеджеру и Администратору.
    */
   private hasPermission(action: StatusAction, actor: Actor): boolean {
     if (actor === 'EXECUTOR') {
@@ -121,6 +122,9 @@ export class StatusMachine {
     }
     if (action.type === 'ADMIN_SET' || action.type === 'CANCEL') {
       return actor === 'ADMIN';
+    }
+    if (action.type === 'REQUEST_ADMIN') {
+      return actor === 'MANAGER';
     }
     return actor === 'MANAGER' || actor === 'ADMIN';
   }
@@ -138,6 +142,10 @@ export class StatusMachine {
       case 'COMPLETE':
         // «Выполнено» допустимо из «В работе» или «Ожидает» (Req 10.4).
         return current === 'IN_PROGRESS' || current === 'WAITING' ? 'DONE' : null;
+
+      case 'START_WORK':
+        // Ручной перевод из «Ожидает» обратно в «В работе».
+        return current === 'WAITING' ? 'IN_PROGRESS' : null;
 
       case 'REOPEN':
         // Переоткрытие допустимо только из «Выполнено» (Req 10.5).

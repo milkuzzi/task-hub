@@ -178,7 +178,7 @@ export class ResticBackupAdapter implements ResticBackupPort {
   ): Promise<string | undefined> {
     return new Promise((resolve, reject) => {
       const child = spawn('restic', ['backup', '--json', dumpFile], {
-        env: { ...process.env, RESTIC_REPOSITORY: repository, RESTIC_PASSWORD: password },
+        env: this.resticEnvironment(repository, password),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -206,6 +206,27 @@ export class ResticBackupAdapter implements ResticBackupPort {
         }
       });
     });
+  }
+
+  /**
+   * Restic для S3-репозиториев читает стандартные AWS_* переменные. Приложение
+   * уже имеет S3_* конфигурацию для манифестов, поэтому передаём её в дочерний
+   * процесс как fallback, не перетирая явно заданные AWS_* значения.
+   */
+  private resticEnvironment(repository: string, password: string): NodeJS.ProcessEnv {
+    const s3 = (
+      this.config as {
+        s3?: { accessKeyId?: string; secretAccessKey?: string; region?: string };
+      }
+    ).s3;
+    return {
+      ...process.env,
+      AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || s3?.accessKeyId || undefined,
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY || s3?.secretAccessKey || undefined,
+      AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || s3?.region || undefined,
+      RESTIC_REPOSITORY: repository,
+      RESTIC_PASSWORD: password,
+    };
   }
 
   /**

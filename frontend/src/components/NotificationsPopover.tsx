@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppPath } from '@/lib/app-path';
 import { useTranslation } from 'react-i18next';
 import { Bell, X } from '@phosphor-icons/react';
 import { formatMsk } from '@/lib/time';
@@ -19,6 +20,7 @@ function byCreatedDesc(a: AppNotification, b: AppNotification): number {
 export function NotificationsPopover(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const appPath = useAppPath();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,7 +137,7 @@ export function NotificationsPopover(): JSX.Element {
       handleSeen(notification.messageId);
     }
     if (notification.taskId !== null) {
-      navigate(`/tasks/${notification.taskId}`);
+      navigate(appPath(`/tasks/${notification.taskId}`));
       closePopover(false);
     }
   }

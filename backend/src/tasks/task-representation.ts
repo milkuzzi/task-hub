@@ -34,6 +34,10 @@ export interface TaskCardView {
   hasUnread: boolean;
   /** Просрочена ли Задача относительно серверного текущего времени. */
   isOverdue: boolean;
+  /** Идентификаторы Исполнителей Задачи для карточки списка. */
+  executorIds: string[];
+  /** Идентификаторы Менеджеров Задачи для карточки списка. */
+  managerIds: string[];
 }
 
 /** Детальная Задача с составом участников (Req 2.12, 10.12). */
@@ -56,15 +60,18 @@ export interface TaskDetailView extends TaskCardView {
  * @param hasUnread Признак наличия непрочитанных Сообщений у текущего Пользователя.
  * @returns Карточка Задачи для списка.
  */
-export function isTaskOverdue(
-  task: Pick<Task, 'deadline' | 'status'>,
-  now: Date,
-): boolean {
+export function isTaskOverdue(task: Pick<Task, 'deadline' | 'status'>, now: Date): boolean {
   return now.getTime() > task.deadline.getTime() && task.status !== TaskStatus.DONE;
 }
 
+type TaskCardSource = Task & Partial<Pick<TaskWithAssignments, 'assignments'>>;
+
+function assignmentIds(task: TaskCardSource, kind: AssignmentKind): string[] {
+  return (task.assignments ?? []).filter((a) => a.kind === kind).map((a) => a.userId);
+}
+
 export function toTaskCard(
-  task: Task,
+  task: TaskCardSource,
   messageCount: number,
   hasUnread: boolean,
   now: Date,
@@ -78,6 +85,8 @@ export function toTaskCard(
     messageCount,
     hasUnread,
     isOverdue: isTaskOverdue(task, now),
+    executorIds: assignmentIds(task, AssignmentKind.EXECUTOR),
+    managerIds: assignmentIds(task, AssignmentKind.MANAGER),
   };
 }
 
@@ -99,15 +108,7 @@ export function toTaskDetail(
   hasUnread: boolean,
   now: Date,
 ): TaskDetailView {
-  const executorIds = task.assignments
-    .filter((a) => a.kind === AssignmentKind.EXECUTOR)
-    .map((a) => a.userId);
-  const managerIds = task.assignments
-    .filter((a) => a.kind === AssignmentKind.MANAGER)
-    .map((a) => a.userId);
   return {
     ...toTaskCard(task, messageCount, hasUnread, now),
-    executorIds,
-    managerIds,
   };
 }

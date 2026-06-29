@@ -1,20 +1,20 @@
-import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   attachmentPreviewKind,
   fetchThumbnailBlob,
   formatAttachmentSize,
   genericIconType,
-  iconGlyph,
+  isDocumentFile,
+  isPdfFile,
+  isPresentationFile,
   isSpreadsheetFile,
-  loadSpreadsheetPreview,
   openAttachment,
   selectRepresentation,
   type GenericIconType,
-  type SpreadsheetPreview,
-} from '@/lib/attachments';
-import { useAuthedImage } from '@/lib/use-authed-image';
-import type { AttachmentMeta } from '@/lib/chat-api';
+} from "@/lib/attachments";
+import { useAuthedImage } from "@/lib/use-authed-image";
+import type { AttachmentMeta } from "@/lib/chat-api";
 
 /**
  * Миниатюра или обобщённый значок Вложения (Req 12.6, 12.7).
@@ -31,11 +31,52 @@ export interface AttachmentThumbnailProps {
 }
 
 function FallbackIcon({ icon }: { icon: GenericIconType }): JSX.Element {
+  const label = fileIconLabel(icon);
   return (
-    <span className="attachment-tile__icon" aria-hidden="true">
-      {iconGlyph(icon)}
+    <span
+      className={`attachment-tile__icon attachment-tile__icon--${icon}`}
+      aria-hidden="true"
+    >
+      <svg className="attachment-tile__icon-svg" viewBox="0 0 48 56" focusable="false">
+        <path className="attachment-tile__icon-page" d="M8 2h22l10 10v42H8z" />
+        <path className="attachment-tile__icon-fold" d="M30 2v12h10" />
+        <rect className="attachment-tile__icon-app" x="4" y="22" width="30" height="24" rx="4" />
+        <text
+          className="attachment-tile__icon-label"
+          x="19"
+          y="38"
+          textAnchor="middle"
+        >
+          {label}
+        </text>
+      </svg>
     </span>
   );
+}
+
+function fileIconLabel(icon: GenericIconType): string {
+  switch (icon) {
+    case "pdf":
+      return "PDF";
+    case "document":
+      return "W";
+    case "spreadsheet":
+      return "X";
+    case "presentation":
+      return "P";
+    case "image":
+      return "IMG";
+    case "video":
+      return "VID";
+    case "audio":
+      return "AUD";
+    case "archive":
+      return "ZIP";
+    case "text":
+      return "TXT";
+    default:
+      return "FILE";
+  }
 }
 
 function VideoPreview({
@@ -96,35 +137,33 @@ function VideoPreview({
   );
 }
 
-function SpreadsheetPreviewTile({
+function AudioPreview({
   attachment,
   fallbackIcon,
+  label,
 }: {
   attachment: AttachmentMeta;
   fallbackIcon: GenericIconType;
+  label: string;
 }): JSX.Element {
-  const [preview, setPreview] = useState<SpreadsheetPreview | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let revoke: (() => void) | null = null;
 
-    setPreview(null);
+    setUrl(null);
     setFailed(false);
 
     openAttachment(attachment)
-      .then(async (result) => {
-        try {
-          const spreadsheet = await loadSpreadsheetPreview(result.blob, attachment, {
-            maxRows: 4,
-            maxColumns: 4,
-          });
-          if (!cancelled) {
-            setPreview(spreadsheet);
-          }
-        } finally {
+      .then((result) => {
+        if (cancelled) {
           result.revoke();
+          return;
         }
+        revoke = result.revoke;
+        setUrl(result.url);
       })
       .catch(() => {
         if (!cancelled) {
@@ -134,31 +173,28 @@ function SpreadsheetPreviewTile({
 
     return () => {
       cancelled = true;
+      if (revoke !== null) {
+        revoke();
+      }
     };
   }, [attachment]);
 
-  if (failed || preview === null || preview.rows.length === 0 || preview.visibleColumns === 0) {
-    return <FallbackIcon icon={fallbackIcon} />;
+  if (failed || url === null) {
+    return (
+      <span className="attachment-tile__audio attachment-tile__audio--loading">
+        <FallbackIcon icon={fallbackIcon} />
+      </span>
+    );
   }
 
   return (
-    <span
-      className="attachment-tile__sheet"
-      style={{ gridTemplateColumns: `repeat(${preview.visibleColumns}, minmax(0, 1fr))` }}
-      aria-hidden="true"
-    >
-      {preview.rows.map((row, rowIndex) =>
-        Array.from({ length: preview.visibleColumns }, (_, columnIndex) => (
-          <span
-            className="attachment-tile__cell"
-            key={`${rowIndex}-${columnIndex}`}
-            title={row[columnIndex] ?? ''}
-          >
-            {row[columnIndex] ?? ''}
-          </span>
-        )),
-      )}
-    </span>
+    <audio
+      className="attachment-tile__audio"
+      src={url}
+      controls
+      preload="metadata"
+      aria-label={label}
+    />
   );
 }
 
@@ -169,7 +205,7 @@ export function AttachmentThumbnail({
   const { t } = useTranslation();
   const representation = selectRepresentation(attachment);
   const previewKind = attachmentPreviewKind(attachment);
-  const wantsThumbnail = representation.kind === 'thumbnail';
+  const wantsThumbnail = representation.kind === "thumbnail";
 
   // Миниатюра защищена авторизацией: грузим байты с Bearer-токеном и
   // показываем через Object URL (Req 12.6, 5.7). Для Вложений без превью
@@ -180,12 +216,40 @@ export function AttachmentThumbnail({
     [attachment.id, wantsThumbnail],
   );
   let fallbackIcon: GenericIconType;
-  if (isSpreadsheetFile(attachment.mimeType, attachment.originalName)) {
-    fallbackIcon = 'spreadsheet';
-  } else if (representation.kind === 'icon') {
+  if (previewKind === "audio") {
+    fallbackIcon = "audio";
+  } else if (isPdfFile(attachment.mimeType, attachment.originalName)) {
+    fallbackIcon = "pdf";
+  } else if (isSpreadsheetFile(attachment.mimeType, attachment.originalName)) {
+    fallbackIcon = "spreadsheet";
+  } else if (isDocumentFile(attachment.mimeType, attachment.originalName)) {
+    fallbackIcon = "document";
+  } else if (isPresentationFile(attachment.mimeType, attachment.originalName)) {
+    fallbackIcon = "presentation";
+  } else if (representation.kind === "icon") {
     fallbackIcon = representation.icon;
   } else {
-    fallbackIcon = genericIconType(attachment.mimeType);
+    fallbackIcon = genericIconType(attachment.mimeType, attachment.originalName);
+  }
+  const title = `${attachment.originalName} · ${formatAttachmentSize(attachment.sizeBytes)}`;
+
+  if (previewKind === "audio") {
+    return (
+      <span
+        className="attachment-tile attachment-tile--audio-player"
+        title={title}
+      >
+        <span className="attachment-tile__preview">
+          <AudioPreview
+            attachment={attachment}
+            fallbackIcon={fallbackIcon}
+            label={t("attachment.audioPlayer", {
+              name: attachment.originalName,
+            })}
+          />
+        </span>
+      </span>
+    );
   }
 
   return (
@@ -193,8 +257,8 @@ export function AttachmentThumbnail({
       className="attachment-tile"
       type="button"
       onClick={onOpen}
-      title={`${attachment.originalName} · ${formatAttachmentSize(attachment.sizeBytes)}`}
-      aria-label={`${t('attachment.open')}: ${attachment.originalName}`}
+      title={title}
+      aria-label={`${t("attachment.open")}: ${attachment.originalName}`}
     >
       <span className="attachment-tile__preview">
         {wantsThumbnail && src !== null ? (
@@ -204,10 +268,8 @@ export function AttachmentThumbnail({
             alt={attachment.originalName}
             loading="lazy"
           />
-        ) : previewKind === 'video' ? (
+        ) : previewKind === "video" ? (
           <VideoPreview attachment={attachment} fallbackIcon={fallbackIcon} />
-        ) : previewKind === 'spreadsheet' ? (
-          <SpreadsheetPreviewTile attachment={attachment} fallbackIcon={fallbackIcon} />
         ) : (
           <FallbackIcon icon={fallbackIcon} />
         )}

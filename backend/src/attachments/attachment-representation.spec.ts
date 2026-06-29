@@ -47,6 +47,9 @@ describe('genericIconType', () => {
     expect(
       genericIconType('application/vnd.openxmlformats-officedocument.presentationml.presentation'),
     ).toBe('presentation');
+    expect(genericIconType('application/vnd.ms-powerpoint.presentation.macroenabled.12')).toBe(
+      'presentation',
+    );
     expect(genericIconType('application/msword')).toBe('document');
   });
 

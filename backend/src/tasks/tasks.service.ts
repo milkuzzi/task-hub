@@ -118,7 +118,9 @@ export class TasksService {
       throw new AccessDeniedException('Создавать задачи может только Менеджер или Администратор.');
     }
 
-    const input = this.validateAndNormalize(dto, managerId);
+    const input = this.validateAndNormalize(dto, managerId, actor.role);
+    await this.enforceNoAdminExecutors(input.executorIds);
+    await this.enforceNoAdminManagers(input.managerIds);
 
     const created = await this.taskRepository.create(this.buildCreateInput(input));
 
@@ -264,7 +266,7 @@ export class TasksService {
    * @returns Страница видимых Задач (возможно пустая).
    * @throws AccessDeniedException Если учётная запись не найдена или удалена.
    */
-  async listVisible(userId: string, query: PaginationQueryDto): Promise<Page<Task>> {
+  async listVisible(userId: string, query: PaginationQueryDto): Promise<Page<TaskWithAssignments>> {
     const actor = await this.userRepository.findActiveById(userId);
     if (actor === null) {
       throw new AccessDeniedException('Учётная запись не найдена или удалена.');
@@ -356,6 +358,8 @@ export class TasksService {
     const executorIds = this.validateAssignees(assignment.executorIds, 'Исполнители');
     const managerIds = this.validateAssignees(assignment.managerIds, 'Менеджеры');
 
+    await this.enforceNoAdminExecutors(executorIds);
+    await this.enforceNoAdminManagers(managerIds);
     await this.enforceManagerAsExecutorRule(actor.role, executorIds);
 
     const updated = await this.taskRepository.replaceAssignments(taskId, executorIds, managerIds);
@@ -671,6 +675,47 @@ export class TasksService {
   }
 
   /**
+   * Запрещает назначать Администратора Исполнителем Задачи.
+   *
+   * Администратор имеет полный доступ к задачам без контекстного назначения;
+   * добавление его в исполнители создаёт лишние назначения и уведомления.
+   */
+  private async enforceNoAdminExecutors(executorIds: string[]): Promise<void> {
+    const candidates = await this.userRepository.findManyActiveByIds(executorIds);
+    const byId = new Map(candidates.map((u) => [u.id, u]));
+    for (const id of executorIds) {
+      const candidate = byId.get(id);
+      if (candidate === undefined) {
+        throw new ValidationException('Назначаемый Исполнитель не найден или удалён.');
+      }
+      if (hasAdminPrivileges(candidate.role)) {
+        throw new ValidationException('Администратор не может быть исполнителем задачи.');
+      }
+    }
+  }
+
+  /**
+   * Запрещает назначать Администратора Менеджером Задачи.
+   *
+   * Администратор и так видит все Задачи и имеет административные права; запись
+   * его в `TaskAssignment(kind=MANAGER)` смешивает системную роль с контекстной
+   * ролью задачи и приводит к лишним назначениям/уведомлениям.
+   */
+  private async enforceNoAdminManagers(managerIds: string[]): Promise<void> {
+    const candidates = await this.userRepository.findManyActiveByIds(managerIds);
+    const byId = new Map(candidates.map((u) => [u.id, u]));
+    for (const id of managerIds) {
+      const candidate = byId.get(id);
+      if (candidate === undefined) {
+        throw new ValidationException('Назначаемый Менеджер не найден или удалён.');
+      }
+      if (hasAdminPrivileges(candidate.role)) {
+        throw new ValidationException('Администратор не может быть менеджером задачи.');
+      }
+    }
+  }
+
+  /**
    * Вычисляет фактически изменённые параметры Задачи по частичному набору
    * правок (Req 10.12, 20.1).
    *
@@ -798,7 +843,10 @@ export class TasksService {
   }
 
   /** Ставит уведомления о первичных назначениях после создания Задачи. */
-  private async notifyInitialAssignments(taskId: string, input: NormalizedTaskInput): Promise<void> {
+  private async notifyInitialAssignments(
+    taskId: string,
+    input: NormalizedTaskInput,
+  ): Promise<void> {
     for (const userId of input.executorIds) {
       await this.taskNotifier.enqueueTaskAssigned?.({
         taskId,
@@ -885,7 +933,11 @@ export class TasksService {
    * исключить дублирующиеся назначения; границы 1–100 проверяются по числу
    * уникальных Пользователей.
    */
-  private validateAndNormalize(dto: CreateTaskDto, creatorId: string): NormalizedTaskInput {
+  private validateAndNormalize(
+    dto: CreateTaskDto,
+    creatorId: string,
+    creatorRole: Role,
+  ): NormalizedTaskInput {
     const title = this.validateTitle(dto.title);
     const description = this.validateDescription(dto.description);
     const deadline = this.validateDeadline(dto.deadline);
@@ -893,6 +945,7 @@ export class TasksService {
     const managerIds = this.includeCreatorManager(
       this.validateAssignees(dto.managerIds, 'Менеджеры'),
       creatorId,
+      creatorRole,
     );
 
     return { title, description, deadline, executorIds, managerIds };
@@ -972,7 +1025,14 @@ export class TasksService {
    * Гарантирует видимость Задачи создающему Пользователю с привилегиями
    * Менеджера: автор создания всегда входит в начальный список Менеджеров.
    */
-  private includeCreatorManager(managerIds: string[], creatorId: string): string[] {
+  private includeCreatorManager(
+    managerIds: string[],
+    creatorId: string,
+    creatorRole: Role,
+  ): string[] {
+    if (hasAdminPrivileges(creatorRole)) {
+      return managerIds;
+    }
     const withCreator = [...new Set([...managerIds, creatorId])];
     const max = this.config.limits.maxAssigneesPerTask;
     if (withCreator.length > max) {

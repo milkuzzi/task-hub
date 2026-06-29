@@ -128,6 +128,7 @@ function buildHarness(actorId: string): Harness {
 
   const userRepository = {
     findActiveById: jest.fn(async (id: string) => users[id] ?? null),
+    findById: jest.fn(async (id: string) => users[id] ?? null),
   } as unknown as UserRepository;
 
   const taskRepository = {

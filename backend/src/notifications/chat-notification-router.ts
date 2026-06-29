@@ -5,6 +5,7 @@ import { hasAdminPrivileges } from '../users/permissions';
 import { NotificationDeliveryService } from './delivery/notification-delivery.service';
 import { NotificationRepository } from './notification.repository';
 import { NotificationsService } from './notifications.service';
+import { NotificationChannel } from './notifications.types';
 
 /**
  * Описание события появления нового Сообщения в Чате Задачи (Req 14.1, 14.2).
@@ -23,6 +24,8 @@ export interface NewChatMessageEvent {
   messageId: string;
   /** Идентификатор автора Сообщения (исключается из получателей, Req 14.1). */
   authorId: string;
+  /** Отображаемое имя автора Сообщения для подробного текста уведомления. */
+  authorDisplayName?: string;
   /** Идентификаторы Исполнителей Задачи. */
   executorIds: readonly string[];
   /** Идентификаторы Менеджеров Задачи. */
@@ -98,16 +101,22 @@ export class ChatNotificationRouter {
       return;
     }
 
+    const payload: Record<string, string> = { authorId: event.authorId };
+    if (event.taskTitle !== undefined && event.taskTitle.trim() !== '') {
+      payload.taskTitle = event.taskTitle;
+    }
+    if (event.authorDisplayName !== undefined && event.authorDisplayName.trim() !== '') {
+      payload.authorDisplayName = event.authorDisplayName;
+    }
+
     await this.notifications.emit({
       type: NotificationType.CHAT_MESSAGE,
       recipientIds,
       taskId: event.taskId,
       messageId: event.messageId,
-      payload:
-        event.taskTitle === undefined || event.taskTitle.trim() === ''
-          ? { authorId: event.authorId }
-          : { authorId: event.authorId, taskTitle: event.taskTitle },
+      payload,
       isMessageNotification: true,
+      channels: [NotificationChannel.Site, NotificationChannel.Max],
       eventKey: `chat-msg:${event.messageId}`,
     });
   }

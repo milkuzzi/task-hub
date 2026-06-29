@@ -1,4 +1,4 @@
-import { Attachment } from '@prisma/client';
+import { Attachment, Role } from '@prisma/client';
 import { MessageWithAttachments } from '../repositories';
 import { ChatMessageView, MessageReaderView } from './chat.service';
 
@@ -55,6 +55,8 @@ export interface ChatMessageHttpView {
   chatId: string;
   authorId: string | null;
   authorDisplayName: string;
+  /** Роль автора, если запись Пользователя доступна; `null` для удалённого автора. */
+  authorRole: Role | null;
   /**
    * Относительный путь до аватара автора Сообщения либо `null`, если автор
    * удалён или аватар не сохранён (дефект 4, Req 2.4). Несёт признак наличия
@@ -136,6 +138,7 @@ export function toChatMessage(
     chatId: message.chatId,
     authorId: message.authorId,
     authorDisplayName: message.authorDisplayName,
+    authorRole: message.author?.role ?? null,
     authorAvatarPath: message.author?.avatarPath ?? null,
     readCount: message._count?.reads ?? 0,
     text: message.text,
@@ -170,6 +173,7 @@ export function fromChatMessageView(view: ChatMessageView): ChatMessageHttpView 
     chatId: view.chatId,
     authorId: view.authorId,
     authorDisplayName: view.authorDisplayName,
+    authorRole: view.authorRole ?? null,
     authorAvatarPath: view.authorAvatarPath ?? null,
     text: view.text,
     createdAt: view.createdAt.toISOString(),

@@ -1,4 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { AppConfigModule } from './config';
 import { ClockModule } from './clock';
 import { CommonModule } from './common';
@@ -7,21 +7,20 @@ import { RepositoriesModule } from './repositories';
 import { MailerModule } from './mailer';
 import { StatusModule } from './status';
 import { UsersModule } from './users';
-import { TasksModule } from './tasks';
+import { TasksModule } from './tasks/tasks.module';
 import { AuditLogModule } from './audit';
 import { AuthModule } from './auth';
-import { ChatModule } from './chat';
+import { ChatModule } from './chat/chat.module';
 import { StorageModule } from './storage';
-import { AttachmentsModule } from './attachments';
-import { NotificationsModule } from './notifications';
+import { AttachmentsModule } from './attachments/attachments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { StatisticsModule } from './statistics';
 import { SearchModule } from './search';
 import { SecurityModule } from './security';
 import { BackupModule } from './backup';
-import { MaxIntegrationModule } from './max';
+import { MaxIntegrationModule } from './max/max.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { HttpsRedirectMiddleware } from './http-redirect';
 
 /**
  * Корневой модуль приложения «Система поручений».
@@ -41,9 +40,8 @@ import { HttpsRedirectMiddleware } from './http-redirect';
  * Сквозные потоки замыкаются через порты и прямые зависимости модулей:
  * Tasks/Chat → Notifications (`TASK_NOTIFIER`, `ChatNotificationRouter`,
  * Req 10.13, 13.12, 14.1) и Tasks/Chat → AuditLog (`AUDIT_RECORDER`, Req 20.1);
- * Gateway ↔ ChatService ↔ StatusMachine — внутри {@link ChatModule}.
- * Middleware перенаправления HTTP→HTTPS применяется ко всем маршрутам
- * (Req 1.3, 1.4).
+ * Gateway ↔ ChatService ↔ StatusMachine — внутри {@link ChatModule}. HTTP→HTTPS
+ * redirect подключается на уровне Fastify adapter в `main.ts` (Req 1.3, 1.4).
  */
 @Module({
   imports: [
@@ -73,9 +71,4 @@ import { HttpsRedirectMiddleware } from './http-redirect';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    // Перенаправление HTTP→HTTPS применяется ко всем входящим маршрутам.
-    consumer.apply(HttpsRedirectMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}

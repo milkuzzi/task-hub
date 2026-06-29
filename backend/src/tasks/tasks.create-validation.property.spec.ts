@@ -95,8 +95,11 @@ describe('Property 22: Валидация параметров задачи пр
     const userRepository = {
       findActiveById: jest.fn(async (id: string) =>
         id === MANAGER_ID
-          ? ({ id, role: Role.ADMIN, deletedAt: null, isActive: true } as unknown as User)
+          ? ({ id, role: Role.MANAGER, deletedAt: null, isActive: true } as unknown as User)
           : null,
+      ),
+      findManyActiveByIds: jest.fn(async (ids: string[]) =>
+        ids.map((id) => ({ id, role: Role.MANAGER, deletedAt: null, isActive: true }) as User),
       ),
     } as unknown as UserRepository;
 

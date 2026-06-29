@@ -1,14 +1,26 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import fc from 'fast-check';
-import { TaskDetailPage } from './TaskDetailPage';
-import { AuthContext, type AuthContextValue } from '@/lib/use-auth';
-import type { CurrentUser } from '@/lib/auth-api';
-import { getTask, listDirectory, type TaskDetail } from '@/lib/tasks-api';
-import { listAttachments, listMessages, listReaders, markRead } from '@/lib/chat-api';
-import { listAuditEntries } from '@/lib/audit-api';
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fc from "fast-check";
+import { TaskDetailPage } from "./TaskDetailPage";
+import { AuthContext, type AuthContextValue } from "@/lib/use-auth";
+import type { CurrentUser } from "@/lib/auth-api";
+import { getTask, listDirectory, type TaskDetail } from "@/lib/tasks-api";
+import {
+  listAttachments,
+  listMessages,
+  listReaders,
+  markRead,
+} from "@/lib/chat-api";
+import { listAuditEntries } from "@/lib/audit-api";
+import { fetchAvatarBlob } from "@/lib/avatar";
 
 /**
  * Property-тест эксклюзивности активной вкладки экрана Задачи (задача 9.4).
@@ -25,8 +37,9 @@ import { listAuditEntries } from '@/lib/audit-api';
  */
 
 // Socket.IO заменяем заглушкой: подписка/отписка не должны выходить в сеть.
-vi.mock('@/lib/socket', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/socket')>('@/lib/socket');
+vi.mock("@/lib/socket", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/socket")>("@/lib/socket");
   return {
     ...actual,
     connectSocket: vi.fn(() => ({ on: vi.fn(), off: vi.fn() })),
@@ -36,14 +49,16 @@ vi.mock('@/lib/socket', async () => {
 });
 
 // REST-вызовы Задачи/справочника мокаем, сохраняя константы/типы модуля.
-vi.mock('@/lib/tasks-api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/tasks-api')>('@/lib/tasks-api');
+vi.mock("@/lib/tasks-api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/tasks-api")>("@/lib/tasks-api");
   return { ...actual, getTask: vi.fn(), listDirectory: vi.fn() };
 });
 
 // Лента Сообщений и Вложения загружаются при монтировании — мокаем загрузчики.
-vi.mock('@/lib/chat-api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/chat-api')>('@/lib/chat-api');
+vi.mock("@/lib/chat-api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/chat-api")>("@/lib/chat-api");
   return {
     ...actual,
     listMessages: vi.fn(),
@@ -54,14 +69,21 @@ vi.mock('@/lib/chat-api', async () => {
 });
 
 // Журнал изменений подгружается при открытии вкладки «Журнал изменений».
-vi.mock('@/lib/audit-api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/audit-api')>('@/lib/audit-api');
+vi.mock("@/lib/audit-api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/audit-api")>("@/lib/audit-api");
   return { ...actual, listAuditEntries: vi.fn() };
+});
+
+vi.mock("@/lib/avatar", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/avatar")>("@/lib/avatar");
+  return { ...actual, fetchAvatarBlob: vi.fn() };
 });
 
 // jsdom не реализует `scrollIntoView`, который `ChatPanel` вызывает в эффекте
 // автопрокрутки ленты. Подменяем заглушкой, чтобы рендер чата не падал.
-if (typeof Element.prototype.scrollIntoView !== 'function') {
+if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = vi.fn();
 }
 
@@ -72,15 +94,16 @@ const mockedListAttachments = vi.mocked(listAttachments);
 const mockedListReaders = vi.mocked(listReaders);
 const mockedMarkRead = vi.mocked(markRead);
 const mockedListAuditEntries = vi.mocked(listAuditEntries);
+const mockedFetchAvatarBlob = vi.mocked(fetchAvatarBlob);
 
 /** Детальная Задача-фикстура для рендера экрана. */
 function taskFixture(): TaskDetail {
   return {
-    id: 'task-1',
-    title: 'Тестовая задача',
+    id: "task-1",
+    title: "Тестовая задача",
     description: null,
-    deadline: '2025-01-01T00:00:00.000Z',
-    status: 'IN_PROGRESS',
+    deadline: "2025-01-01T00:00:00.000Z",
+    status: "IN_PROGRESS",
     messageCount: 0,
     hasUnread: false,
     isOverdue: false,
@@ -92,10 +115,10 @@ function taskFixture(): TaskDetail {
 /** Текущий Пользователь-Администратор: видит все три вкладки. */
 function adminUser(): CurrentUser {
   return {
-    id: 'admin-1',
-    email: 'admin@example.com',
-    name: 'Администратор',
-    role: 'ADMIN',
+    id: "admin-1",
+    email: "admin@example.com",
+    name: "Администратор",
+    role: "ADMIN",
     avatarPath: null,
     maxLinked: false,
   };
@@ -118,7 +141,7 @@ function authValue(user: CurrentUser): AuthContextValue {
  * содержимого соответствующей панели в пустом состоянии.
  */
 interface TabSpec {
-  readonly id: 'chat' | 'attachments' | 'audit';
+  readonly id: "chat" | "attachments" | "audit";
   readonly label: string;
   /** Уникальный текст содержимого панели (пустое состояние). */
   readonly contentText: string;
@@ -128,13 +151,21 @@ interface TabSpec {
 
 const TABS: readonly TabSpec[] = [
   {
-    id: 'chat',
-    label: 'Чат',
-    contentText: 'Введите сообщение (до 4000 символов)',
+    id: "chat",
+    label: "Чат",
+    contentText: "Введите сообщение (до 4000 символов)",
     contentIsPlaceholder: true,
   },
-  { id: 'attachments', label: 'Вложения', contentText: 'В чате задачи пока нет вложений.' },
-  { id: 'audit', label: 'Журнал изменений', contentText: 'Изменений по задаче пока нет.' },
+  {
+    id: "attachments",
+    label: "Вложения",
+    contentText: "В чате задачи пока нет вложений.",
+  },
+  {
+    id: "audit",
+    label: "Журнал изменений",
+    contentText: "Изменений по задаче пока нет.",
+  },
 ];
 
 /** Ищет в DOM маркер содержимого панели для вкладки (или null, если скрыта). */
@@ -147,7 +178,7 @@ function queryContent(spec: TabSpec): HTMLElement | null {
 function renderPage(): void {
   render(
     <AuthContext.Provider value={authValue(adminUser())}>
-      <MemoryRouter initialEntries={['/tasks/task-1']}>
+      <MemoryRouter initialEntries={["/tasks/task-1"]}>
         <Routes>
           <Route path="/tasks/:taskId" element={<TaskDetailPage />} />
         </Routes>
@@ -164,6 +195,9 @@ beforeEach(() => {
   mockedListReaders.mockResolvedValue([]);
   mockedMarkRead.mockResolvedValue(undefined as never);
   mockedListAuditEntries.mockResolvedValue([]);
+  mockedFetchAvatarBlob.mockResolvedValue(
+    new Blob(["avatar"], { type: "image/png" }),
+  );
 });
 
 afterEach(() => {
@@ -171,9 +205,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('TaskDetailPage — вкладки (Property 12)', () => {
+describe("TaskDetailPage — вкладки (Property 12)", () => {
   // Feature: ui-ux-redesign, Property 12: Эксклюзивность активной вкладки
-  it('для любой выбранной вкладки показано её содержимое, остальные скрыты, и ровно у неё aria-selected=true', async () => {
+  it("для любой выбранной вкладки показано её содержимое, остальные скрыты, и ровно у неё aria-selected=true", async () => {
     await fc.assert(
       fc.asyncProperty(fc.constantFrom(...TABS), async (chosen) => {
         const user = userEvent.setup();
@@ -181,12 +215,12 @@ describe('TaskDetailPage — вкладки (Property 12)', () => {
 
         try {
           // Дожидаемся завершения загрузки и появления панели вкладок.
-          const initialTab = await screen.findByRole('tab', { name: 'Чат' });
+          const initialTab = await screen.findByRole("tab", { name: "Чат" });
           expect(initialTab).toBeInTheDocument();
 
           // Активируем выбранную вкладку (если это не вкладка по умолчанию).
-          if (chosen.id !== 'chat') {
-            await user.click(screen.getByRole('tab', { name: chosen.label }));
+          if (chosen.id !== "chat") {
+            await user.click(screen.getByRole("tab", { name: chosen.label }));
           }
 
           // Содержимое выбранной вкладки отображается (Журнал грузится асинхронно).
@@ -202,15 +236,19 @@ describe('TaskDetailPage — вкладки (Property 12)', () => {
           }
 
           // Ровно у выбранной вкладки aria-selected="true", у остальных — "false".
-          const tabs = screen.getAllByRole('tab');
-          const selected = tabs.filter((t) => t.getAttribute('aria-selected') === 'true');
+          const tabs = screen.getAllByRole("tab");
+          const selected = tabs.filter(
+            (t) => t.getAttribute("aria-selected") === "true",
+          );
           expect(selected).toHaveLength(1);
           // Длина проверена выше — единственный выбранный таб существует.
           const selectedTab = selected[0]!;
-          expect(within(selectedTab).getByText(chosen.label)).toBeInTheDocument();
+          expect(
+            within(selectedTab).getByText(chosen.label),
+          ).toBeInTheDocument();
           for (const t of tabs) {
             if (t !== selectedTab) {
-              expect(t.getAttribute('aria-selected')).toBe('false');
+              expect(t.getAttribute("aria-selected")).toBe("false");
             }
           }
         } finally {

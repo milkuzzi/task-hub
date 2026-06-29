@@ -1,4 +1,4 @@
-import { TaskStatus, type Task } from '@prisma/client';
+import { AssignmentKind, TaskStatus, type Task } from '@prisma/client';
 import { isTaskOverdue, toTaskCard, toTaskDetail } from './task-representation';
 import type { TaskWithAssignments } from '../repositories';
 
@@ -44,6 +44,24 @@ describe('task-representation overdue flag', () => {
 
     expect(isTaskOverdue(source, NOW)).toBe(false);
     expect(isTaskOverdue(future, NOW)).toBe(false);
+  });
+
+  it('includes executor and manager ids in task cards', () => {
+    const source: TaskWithAssignments = {
+      ...task(),
+      assignments: [
+        { id: 'a1', taskId: 'task-1', userId: 'executor-1', kind: AssignmentKind.EXECUTOR },
+        { id: 'a2', taskId: 'task-1', userId: 'executor-2', kind: AssignmentKind.EXECUTOR },
+        { id: 'a3', taskId: 'task-1', userId: 'manager-1', kind: AssignmentKind.MANAGER },
+      ],
+    };
+
+    expect(toTaskCard(source, 0, false, NOW)).toEqual(
+      expect.objectContaining({
+        executorIds: ['executor-1', 'executor-2'],
+        managerIds: ['manager-1'],
+      }),
+    );
   });
 
   it('includes isOverdue in detail responses', () => {

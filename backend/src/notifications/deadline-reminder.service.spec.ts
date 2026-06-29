@@ -12,6 +12,7 @@ const NOW = new Date('2024-01-01T00:00:00.000Z');
 function taskStub(seconds: number): TaskWithAssignments {
   return {
     id: 'task-1',
+    title: 'Дедлайн-задача',
     deadline: new Date(NOW.getTime() + seconds * 1000),
     assignments: [
       { id: 'a1', taskId: 'task-1', userId: 'exec-1', kind: AssignmentKind.EXECUTOR },
@@ -64,7 +65,13 @@ describe('DeadlineReminderService', () => {
 
       expect(markSent).toHaveBeenCalledTimes(1);
       expect(markSent).toHaveBeenCalledWith('task-1', ReminderThreshold.FAR);
-      expect(notify).toHaveBeenCalledWith('task-1', ReminderThreshold.FAR, ['exec-1'], ['mgr-1']);
+      expect(notify).toHaveBeenCalledWith(
+        'task-1',
+        ReminderThreshold.FAR,
+        ['exec-1'],
+        ['mgr-1'],
+        'Дедлайн-задача',
+      );
     });
 
     it('отправляет только ближний порог, когда остаток меньше ближнего', async () => {
@@ -73,7 +80,13 @@ describe('DeadlineReminderService', () => {
       await service.scheduleDeadlineReminders(taskStub(3_600));
 
       expect(markSent).toHaveBeenCalledWith('task-1', ReminderThreshold.NEAR);
-      expect(notify).toHaveBeenCalledWith('task-1', ReminderThreshold.NEAR, ['exec-1'], ['mgr-1']);
+      expect(notify).toHaveBeenCalledWith(
+        'task-1',
+        ReminderThreshold.NEAR,
+        ['exec-1'],
+        ['mgr-1'],
+        'Дедлайн-задача',
+      );
     });
 
     it('ничего не отправляет, когда остаток больше дальнего порога', async () => {
@@ -104,7 +117,13 @@ describe('DeadlineReminderService', () => {
 
       expect(findRange).toHaveBeenCalledTimes(1);
       expect(markSent).toHaveBeenCalledWith('task-1', ReminderThreshold.FAR);
-      expect(notify).toHaveBeenCalledWith('task-1', ReminderThreshold.FAR, ['exec-1'], ['mgr-1']);
+      expect(notify).toHaveBeenCalledWith(
+        'task-1',
+        ReminderThreshold.FAR,
+        ['exec-1'],
+        ['mgr-1'],
+        'Дедлайн-задача',
+      );
     });
 
     it('фиксирует факт отправки до постановки уведомления (защита от гонки)', async () => {

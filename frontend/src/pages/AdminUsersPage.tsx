@@ -1,17 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowCounterClockwise,
   CrownSimple,
+  ImageSquare,
   PencilSimple,
   Trash,
-} from '@phosphor-icons/react';
-import { useAuth } from '@/lib/use-auth';
-import { ApiError } from '@/lib/api';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { InviteUserForm } from '@/components/InviteUserForm';
-import { UserAvatar } from '@/components/UserAvatar';
-import { formatMsk } from '@/lib/time';
+} from "@phosphor-icons/react";
+import { useAuth } from "@/lib/use-auth";
+import { ApiError } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { InviteUserForm } from "@/components/InviteUserForm";
+import { UserAvatar } from "@/components/UserAvatar";
+import { AVATAR_SUPPORTED_TYPES, validateAvatar } from "@/lib/avatar";
+import { formatMsk } from "@/lib/time";
 import {
   deleteUser,
   listDeletedUsers,
@@ -19,10 +27,11 @@ import {
   restoreUser,
   transferAdmin,
   updateUser,
+  uploadUserAvatar,
   type AdminUser,
   type DeletedUser,
   type DeleteMode,
-} from '@/lib/users-api';
+} from "@/lib/users-api";
 
 /**
  * Экран администрирования Пользователей (задача 20.3).
@@ -39,45 +48,79 @@ import {
  */
 export function AdminUsersPage(): JSX.Element {
   const { t } = useTranslation();
-  const { user: current } = useAuth();
+  const { user: current, setUser } = useAuth();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [deleted, setDeleted] = useState<DeletedUser[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Состояние диалогов и текущих операций.
   const [editing, setEditing] = useState<AdminUser | null>(null);
-  const [editEmail, setEditEmail] = useState('');
-  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState("");
+  const [editName, setEditName] = useState("");
 
   const [deletingUser, setDeletingUser] = useState<AdminUser | null>(null);
-  const [deleteMode, setDeleteMode] = useState<DeleteMode>('soft');
+  const [deleteMode, setDeleteMode] = useState<DeleteMode>("soft");
 
-  const [transferTarget, setTransferTarget] = useState<AdminUser | null>(null);
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState("");
 
   const [restoringUser, setRestoringUser] = useState<DeletedUser | null>(null);
-  const [restoreEmail, setRestoreEmail] = useState('');
+  const [restoreEmail, setRestoreEmail] = useState("");
 
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [avatarTarget, setAvatarTarget] = useState<AdminUser | null>(null);
+  const [avatarBusyId, setAvatarBusyId] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarSuccess, setAvatarSuccess] = useState<string | null>(null);
 
-  const isAdmin = current?.role === 'ADMIN';
+  const isAdmin = current?.role === "ADMIN";
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase("ru-RU");
+  const filteredUsers =
+    normalizedSearch === ""
+      ? users
+      : users.filter((user) =>
+          `${user.name} ${user.email}`
+            .toLocaleLowerCase("ru-RU")
+            .includes(normalizedSearch),
+        );
+  const filteredDeleted =
+    normalizedSearch === ""
+      ? deleted
+      : deleted.filter((user) =>
+          `${user.name} ${user.emails.join(" ")}`
+            .toLocaleLowerCase("ru-RU")
+            .includes(normalizedSearch),
+        );
+  const transferCandidates = users.filter(
+    (user) => user.role !== "ADMIN" && user.active && !user.locked,
+  );
+  const transferTarget =
+    transferCandidates.find((user) => user.id === transferTargetId) ?? null;
 
   const reload = useCallback(async (): Promise<void> => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [active, removed] = await Promise.all([listUsers(), listDeletedUsers()]);
+      const [active, removed] = await Promise.all([
+        listUsers(),
+        listDeletedUsers(),
+      ]);
       if (!Array.isArray(active) || !Array.isArray(removed)) {
-        throw new TypeError('Некорректный ответ API: ожидались списки пользователей');
+        throw new TypeError(
+          "Некорректный ответ API: ожидались списки пользователей",
+        );
       }
       setUsers(active);
       setDeleted(removed);
     } catch (err) {
       setUsers([]);
       setDeleted([]);
-      setLoadError(err instanceof ApiError ? err.message : t('errors.generic'));
+      setLoadError(err instanceof ApiError ? err.message : t("errors.generic"));
     } finally {
       setLoading(false);
     }
@@ -97,11 +140,11 @@ export function AdminUsersPage(): JSX.Element {
       <section className="stack page-section">
         <div className="page-head">
           <div className="page-head__content">
-            <h1>{t('nav.users')}</h1>
+            <h1>{t("nav.users")}</h1>
           </div>
         </div>
         <p className="form-error" role="alert">
-          {t('errors.forbidden')}
+          {t("errors.forbidden")}
         </p>
       </section>
     );
@@ -109,6 +152,9 @@ export function AdminUsersPage(): JSX.Element {
 
   function openEdit(user: AdminUser): void {
     setActionError(null);
+    setAvatarError(null);
+    setAvatarSuccess(null);
+    setAvatarTarget(null);
     setEditing(user);
     setEditEmail(user.email);
     setEditName(user.name);
@@ -116,21 +162,32 @@ export function AdminUsersPage(): JSX.Element {
 
   function openDelete(user: AdminUser): void {
     setActionError(null);
-    setDeleteMode('soft');
+    setDeleteMode("soft");
     setDeletingUser(user);
   }
 
   function openRestore(user: DeletedUser): void {
     setActionError(null);
-    setRestoreEmail(user.emails[0] ?? '');
+    setRestoreEmail(user.emails[0] ?? "");
     setRestoringUser(user);
+  }
+
+  function openAvatarUpload(user: AdminUser): void {
+    setAvatarTarget(user);
+    setAvatarError(null);
+    setAvatarSuccess(null);
+    avatarInputRef.current?.click();
   }
 
   function closeDialogs(): void {
     setEditing(null);
     setDeletingUser(null);
-    setTransferTarget(null);
+    setTransferDialogOpen(false);
+    setTransferTargetId("");
     setRestoringUser(null);
+    setAvatarTarget(null);
+    setAvatarError(null);
+    setAvatarSuccess(null);
     setActionError(null);
   }
 
@@ -142,7 +199,9 @@ export function AdminUsersPage(): JSX.Element {
       closeDialogs();
       await reload();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : t('errors.generic'));
+      setActionError(
+        err instanceof ApiError ? err.message : t("errors.generic"),
+      );
     } finally {
       setActionBusy(false);
     }
@@ -163,7 +222,70 @@ export function AdminUsersPage(): JSX.Element {
       closeDialogs();
       return;
     }
-    void runAction(() => updateUser(editing.id, patch).then(() => undefined));
+    void runAction(async () => {
+      const updated = await updateUser(editing.id, patch);
+      if (current !== null && updated.id === current.id) {
+        setUser({
+          id: updated.id,
+          email: updated.email,
+          name: updated.name,
+          role: updated.role,
+          avatarPath: updated.avatarPath ?? null,
+          maxLinked: updated.maxLinked,
+        });
+      }
+    });
+  }
+
+  async function handleAvatarChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ): Promise<void> {
+    const file = event.target.files?.[0];
+    const target = avatarTarget;
+    event.target.value = "";
+
+    if (file === undefined || target === null) {
+      return;
+    }
+
+    setAvatarError(null);
+    setAvatarSuccess(null);
+    const validation = validateAvatar(file);
+    if (!validation.ok) {
+      setAvatarError(
+        validation.reason === "type"
+          ? t("profile.avatar.errorType")
+          : t("profile.avatar.errorSize"),
+      );
+      return;
+    }
+
+    setAvatarBusyId(target.id);
+    try {
+      const updated = await uploadUserAvatar(target.id, file);
+      setUsers((prev) =>
+        prev.map((user) => (user.id === updated.id ? updated : user)),
+      );
+      setEditing((prev) => (prev?.id === updated.id ? updated : prev));
+      if (current !== null && updated.id === current.id) {
+        setUser({
+          id: updated.id,
+          email: updated.email,
+          name: updated.name,
+          role: updated.role,
+          avatarPath: updated.avatarPath ?? null,
+          maxLinked: updated.maxLinked,
+        });
+      }
+      setAvatarSuccess(t("admin.avatar.updated", { name: updated.name }));
+    } catch (err) {
+      setAvatarError(
+        err instanceof ApiError ? err.message : t("errors.generic"),
+      );
+    } finally {
+      setAvatarBusyId(null);
+      setAvatarTarget(null);
+    }
   }
 
   function handleDeleteConfirm(): void {
@@ -181,53 +303,87 @@ export function AdminUsersPage(): JSX.Element {
   }
 
   function handleRestoreConfirm(): void {
-    if (restoringUser === null || restoreEmail === '') {
+    if (restoringUser === null || restoreEmail === "") {
       return;
     }
-    void runAction(() => restoreUser(restoringUser.id, restoreEmail).then(() => undefined));
+    void runAction(() =>
+      restoreUser(restoringUser.id, restoreEmail).then(() => undefined),
+    );
   }
 
   return (
     <section className="stack page-section">
       <div className="page-head">
         <div className="page-head__content">
-          <h1>{t('admin.heading')}</h1>
+          <h1>{t("admin.heading")}</h1>
         </div>
       </div>
 
       <article className="panel panel--compact stack admin-section">
-        <h2>{t('admin.invite.heading')}</h2>
+        <h2>{t("admin.invite.heading")}</h2>
         <InviteUserForm onInvited={() => void reload()} />
       </article>
 
+      <div className="panel panel--compact admin-user-search">
+        <input
+          className="field__input"
+          type="search"
+          aria-label={t("admin.search.label")}
+          placeholder={t("admin.search.placeholder")}
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+        />
+      </div>
+
       <article className="panel panel--compact admin-section">
         <div className="admin-section__head">
-          <h2>{t('admin.activeUsers')}</h2>
-          <span className="admin-section__count">{users.length}</span>
+          <h2>{t("admin.activeUsers")}</h2>
+          <span className="admin-section__count">{filteredUsers.length}</span>
         </div>
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept={AVATAR_SUPPORTED_TYPES.join(",")}
+          hidden
+          onChange={(e) => void handleAvatarChange(e)}
+        />
         {loadError !== null && (
           <p className="form-error" role="alert">
             {loadError}
           </p>
         )}
         {loading ? (
-          <p>{t('common.loading')}</p>
-        ) : users.length === 0 ? (
-          <p className="text-muted">{t('common.empty')}</p>
+          <p>{t("common.loading")}</p>
+        ) : filteredUsers.length === 0 ? (
+          <p className="text-muted">
+            {normalizedSearch === ""
+              ? t("common.empty")
+              : t("admin.search.empty")}
+          </p>
         ) : (
           <div className="admin-directory admin-directory--active">
             <div className="admin-directory__header" aria-hidden="true">
-              <span>{t('admin.columns.user')}</span>
-              <span>{t('admin.columns.status')}</span>
-              <span>{t('admin.columns.actions')}</span>
+              <span>{t("admin.columns.user")}</span>
+              <span>{t("admin.columns.status")}</span>
+              <span>{t("admin.columns.actions")}</span>
             </div>
-            <ul className="admin-directory__list" aria-label={t('admin.activeUsers')}>
-              {users.map((u) => (
-                <li className="admin-directory__row" key={u.id}>
+            <ul
+              className="admin-directory__list"
+              aria-label={t("admin.activeUsers")}
+            >
+              {filteredUsers.map((u) => (
+                <li
+                  className={
+                    u.role === "ADMIN"
+                      ? "admin-directory__row admin-directory__row--admin"
+                      : "admin-directory__row"
+                  }
+                  key={u.id}
+                >
                   <div className="admin-directory__identity">
                     <UserAvatar
                       userId={u.id}
-                      hasAvatar={u.avatarPath === undefined ? undefined : u.avatarPath !== null}
+                      avatarPath={u.avatarPath}
                       size="md"
                     />
                     <div className="admin-directory__identity-copy">
@@ -239,46 +395,54 @@ export function AdminUsersPage(): JSX.Element {
                     <span
                       className={
                         u.locked
-                          ? 'status-badge status-badge--needs_admin'
+                          ? "status-badge status-badge--needs_admin"
                           : !u.active
-                            ? 'status-badge status-badge--waiting'
-                            : 'status-badge status-badge--done'
+                            ? "status-badge status-badge--waiting"
+                            : "status-badge status-badge--done"
                       }
                     >
                       {!u.active
-                        ? t('admin.status.pending')
+                        ? t("admin.status.pending")
                         : u.locked
-                          ? t('admin.status.locked')
-                          : t('admin.status.active')}
+                          ? t("admin.status.locked")
+                          : t("admin.status.active")}
                     </span>
                   </div>
                   <div className="admin-directory__actions">
                     <button
                       className="btn btn--sm"
                       type="button"
-                      aria-label={`${t('admin.actions.edit')}: ${u.name}`}
-                      title={t('admin.actions.edit')}
+                      aria-label={`${t("admin.actions.edit")}: ${u.name}`}
+                      title={t("admin.actions.edit")}
                       onClick={() => openEdit(u)}
                     >
                       <PencilSimple size={16} aria-hidden="true" />
                       <span className="admin-directory__action-label">
-                        {t('admin.actions.edit')}
+                        {t("admin.actions.edit")}
                       </span>
                     </button>
-                    {u.role !== 'ADMIN' && u.active && (
+                    {u.role === "ADMIN" && (
                       <button
                         className="btn btn--sm"
                         type="button"
-                        aria-label={`${t('admin.actions.transferAdmin')}: ${u.name}`}
-                        title={t('admin.actions.transferAdmin')}
+                        disabled={transferCandidates.length === 0}
+                        aria-label={`${t("admin.actions.transferAdministration")}: ${u.name}`}
+                        title={t("admin.actions.transferAdministration")}
                         onClick={() => {
                           setActionError(null);
-                          setTransferTarget(u);
+                          setTransferTargetId("");
+                          setTransferDialogOpen(true);
                         }}
                       >
                         <CrownSimple size={16} aria-hidden="true" />
-                        <span className="admin-directory__action-label">
-                          {t('admin.actions.transferAdminShort')}
+                        <span className="admin-directory__action-label admin-directory__action-label--full">
+                          {t("admin.actions.transferAdministration")}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="admin-directory__action-label admin-directory__action-label--compact"
+                        >
+                          {t("admin.actions.transferAdministrationShort")}
                         </span>
                       </button>
                     )}
@@ -286,13 +450,13 @@ export function AdminUsersPage(): JSX.Element {
                       <button
                         className="btn btn--sm btn--danger"
                         type="button"
-                        aria-label={`${t('common.delete')}: ${u.name}`}
-                        title={t('common.delete')}
+                        aria-label={`${t("common.delete")}: ${u.name}`}
+                        title={t("common.delete")}
                         onClick={() => openDelete(u)}
                       >
                         <Trash size={16} aria-hidden="true" />
                         <span className="admin-directory__action-label">
-                          {t('common.delete')}
+                          {t("common.delete")}
                         </span>
                       </button>
                     )}
@@ -306,31 +470,41 @@ export function AdminUsersPage(): JSX.Element {
 
       <article className="panel panel--compact admin-section">
         <div className="admin-section__head">
-          <h2>{t('admin.deletedUsers')}</h2>
-          <span className="admin-section__count">{deleted.length}</span>
+          <h2>{t("admin.deletedUsers")}</h2>
+          <span className="admin-section__count">{filteredDeleted.length}</span>
         </div>
         {loading ? (
-          <p>{t('common.loading')}</p>
-        ) : deleted.length === 0 ? (
-          <p className="text-muted">{t('admin.noDeleted')}</p>
+          <p>{t("common.loading")}</p>
+        ) : filteredDeleted.length === 0 ? (
+          <p className="text-muted">
+            {normalizedSearch === ""
+              ? t("admin.noDeleted")
+              : t("admin.search.empty")}
+          </p>
         ) : (
           <div className="admin-directory admin-directory--deleted">
             <div className="admin-directory__header" aria-hidden="true">
-              <span>{t('admin.columns.user')}</span>
-              <span>{t('admin.columns.deletedAt')}</span>
-              <span>{t('admin.columns.actions')}</span>
+              <span>{t("admin.columns.user")}</span>
+              <span>{t("admin.columns.deletedAt")}</span>
+              <span>{t("admin.columns.actions")}</span>
             </div>
-            <ul className="admin-directory__list" aria-label={t('admin.deletedUsers')}>
-              {deleted.map((u) => (
+            <ul
+              className="admin-directory__list"
+              aria-label={t("admin.deletedUsers")}
+            >
+              {filteredDeleted.map((u) => (
                 <li className="admin-directory__row" key={u.id}>
                   <div className="admin-directory__identity">
                     <UserAvatar userId={null} hasAvatar={false} size="md" />
                     <div className="admin-directory__identity-copy">
                       <strong>{u.name}</strong>
-                      <span>{u.emails[0] ?? t('admin.restore.noEmails')}</span>
+                      <span>{u.emails[0] ?? t("admin.restore.noEmails")}</span>
                     </div>
                   </div>
-                  <time className="admin-directory__deleted-at" dateTime={u.deletedAt}>
+                  <time
+                    className="admin-directory__deleted-at"
+                    dateTime={u.deletedAt}
+                  >
                     {formatMsk(new Date(u.deletedAt))}
                   </time>
                   <div className="admin-directory__actions">
@@ -340,15 +514,15 @@ export function AdminUsersPage(): JSX.Element {
                       disabled={u.emails.length === 0}
                       title={
                         u.emails.length === 0
-                          ? t('admin.restore.noEmails')
-                          : t('admin.actions.restore')
+                          ? t("admin.restore.noEmails")
+                          : t("admin.actions.restore")
                       }
-                      aria-label={`${t('admin.actions.restore')}: ${u.name}`}
+                      aria-label={`${t("admin.actions.restore")}: ${u.name}`}
                       onClick={() => openRestore(u)}
                     >
                       <ArrowCounterClockwise size={16} aria-hidden="true" />
                       <span className="admin-directory__action-label">
-                        {t('admin.actions.restore')}
+                        {t("admin.actions.restore")}
                       </span>
                     </button>
                   </div>
@@ -362,8 +536,8 @@ export function AdminUsersPage(): JSX.Element {
       {/* Изменение email/имени (Req 6.2, 6.3). */}
       <ConfirmDialog
         open={editing !== null}
-        title={t('admin.edit.heading')}
-        confirmLabel={t('common.save')}
+        title={t("admin.edit.heading")}
+        confirmLabel={t("common.save")}
         busy={actionBusy}
         onConfirm={handleEditConfirm}
         onCancel={closeDialogs}
@@ -374,8 +548,39 @@ export function AdminUsersPage(): JSX.Element {
               {actionError}
             </p>
           )}
+          {avatarError !== null && (
+            <p className="form-error" role="alert">
+              {avatarError}
+            </p>
+          )}
+          {avatarSuccess !== null && (
+            <p className="form-success" role="status">
+              {avatarSuccess}
+            </p>
+          )}
+          {editing !== null && (
+            <div className="admin-edit-avatar">
+              <UserAvatar
+                userId={editing.id}
+                avatarPath={editing.avatarPath ?? null}
+                size="md"
+              />
+              <button
+                className="btn btn--secondary"
+                type="button"
+                disabled={actionBusy || avatarBusyId !== null}
+                aria-busy={avatarBusyId === editing.id}
+                onClick={() => openAvatarUpload(editing)}
+              >
+                <ImageSquare size={16} aria-hidden="true" />
+                {avatarBusyId === editing.id
+                  ? t("profile.avatar.uploading")
+                  : t("profile.avatar.change")}
+              </button>
+            </div>
+          )}
           <label className="field">
-            <span className="field__label">{t('login.email')}</span>
+            <span className="field__label">{t("login.email")}</span>
             <input
               className="field__input"
               type="email"
@@ -385,7 +590,7 @@ export function AdminUsersPage(): JSX.Element {
             />
           </label>
           <label className="field">
-            <span className="field__label">{t('admin.columns.name')}</span>
+            <span className="field__label">{t("admin.columns.name")}</span>
             <input
               className="field__input"
               type="text"
@@ -400,8 +605,8 @@ export function AdminUsersPage(): JSX.Element {
       {/* Удаление с выбором режима и подтверждением (Req 8.1, 8.9). */}
       <ConfirmDialog
         open={deletingUser !== null}
-        title={t('admin.delete.heading')}
-        confirmLabel={t('common.delete')}
+        title={t("admin.delete.heading")}
+        confirmLabel={t("common.delete")}
         danger
         busy={actionBusy}
         onConfirm={handleDeleteConfirm}
@@ -413,32 +618,35 @@ export function AdminUsersPage(): JSX.Element {
               {actionError}
             </p>
           )}
-          <p>{t('admin.delete.prompt', { name: deletingUser?.name ?? '' })}</p>
+          <p>{t("admin.delete.prompt", { name: deletingUser?.name ?? "" })}</p>
           <label className="field">
-            <span className="field__label">{t('admin.delete.mode')}</span>
+            <span className="field__label">{t("admin.delete.mode")}</span>
             <select
               className="field__input"
               value={deleteMode}
               onChange={(e) => setDeleteMode(e.target.value as DeleteMode)}
               disabled={actionBusy}
             >
-              <option value="soft">{t('admin.delete.soft')}</option>
-              <option value="hard">{t('admin.delete.hard')}</option>
+              <option value="soft">{t("admin.delete.soft")}</option>
+              <option value="hard">{t("admin.delete.hard")}</option>
             </select>
           </label>
           <p className="field__hint">
-            {deleteMode === 'soft' ? t('admin.delete.softHint') : t('admin.delete.hardHint')}
+            {deleteMode === "soft"
+              ? t("admin.delete.softHint")
+              : t("admin.delete.hardHint")}
           </p>
         </div>
       </ConfirmDialog>
 
       {/* Передача роли администратора с подтверждением (Req 3.1). */}
       <ConfirmDialog
-        open={transferTarget !== null}
-        title={t('admin.transfer.heading')}
-        confirmLabel={t('admin.actions.transferAdmin')}
+        open={transferDialogOpen}
+        title={t("admin.transfer.heading")}
+        confirmLabel={t("admin.actions.transferAdministration")}
         danger
         busy={actionBusy}
+        confirmDisabled={transferTarget === null}
         onConfirm={handleTransferConfirm}
         onCancel={closeDialogs}
       >
@@ -448,18 +656,38 @@ export function AdminUsersPage(): JSX.Element {
               {actionError}
             </p>
           )}
-          <p>{t('admin.transfer.prompt', { name: transferTarget?.name ?? '' })}</p>
-          <p className="field__hint">{t('admin.transfer.hint')}</p>
+          <label className="field">
+            <span className="field__label">
+              {t("admin.transfer.chooseUser")}
+            </span>
+            <select
+              className="field__input"
+              value={transferTargetId}
+              onChange={(event) => setTransferTargetId(event.target.value)}
+              disabled={actionBusy}
+            >
+              <option value="">{t("admin.transfer.placeholder")}</option>
+              {transferCandidates.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name} · {user.email}
+                </option>
+              ))}
+            </select>
+          </label>
+          {transferTarget !== null && (
+            <p>{t("admin.transfer.prompt", { name: transferTarget.name })}</p>
+          )}
+          <p className="field__hint">{t("admin.transfer.hint")}</p>
         </div>
       </ConfirmDialog>
 
       {/* Восстановление по выбранному сохранённому адресу (Req 7.2, 7.3). */}
       <ConfirmDialog
         open={restoringUser !== null}
-        title={t('admin.restore.heading')}
-        confirmLabel={t('admin.actions.restore')}
+        title={t("admin.restore.heading")}
+        confirmLabel={t("admin.actions.restore")}
         busy={actionBusy}
-        confirmDisabled={restoreEmail === ''}
+        confirmDisabled={restoreEmail === ""}
         onConfirm={handleRestoreConfirm}
         onCancel={closeDialogs}
       >
@@ -470,10 +698,12 @@ export function AdminUsersPage(): JSX.Element {
             </p>
           )}
           {restoringUser !== null && restoringUser.emails.length === 0 ? (
-            <p className="form-error">{t('admin.restore.noEmails')}</p>
+            <p className="form-error">{t("admin.restore.noEmails")}</p>
           ) : (
             <label className="field">
-              <span className="field__label">{t('admin.restore.chooseEmail')}</span>
+              <span className="field__label">
+                {t("admin.restore.chooseEmail")}
+              </span>
               <select
                 className="field__input"
                 value={restoreEmail}

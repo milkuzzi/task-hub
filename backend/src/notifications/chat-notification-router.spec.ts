@@ -4,7 +4,7 @@ import { NotificationDeliveryService } from './delivery/notification-delivery.se
 import { ChatNotificationRouter } from './chat-notification-router';
 import { NotificationRepository } from './notification.repository';
 import { NotificationsService } from './notifications.service';
-import { DomainEvent } from './notifications.types';
+import { DomainEvent, NotificationChannel } from './notifications.types';
 
 /**
  * Юнит-тесты маршрутизатора Уведомлений по событиям Чата (Req 14.1, 14.2, 14.4,
@@ -96,6 +96,7 @@ describe('ChatNotificationRouter.notifyNewMessage', () => {
     const event = emit.mock.calls[0]![0];
     expect(event.type).toBe(NotificationType.CHAT_MESSAGE);
     expect(event.isMessageNotification).toBe(true);
+    expect(event.channels).toEqual([NotificationChannel.Site, NotificationChannel.Max]);
     expect(event.messageId).toBe('msg-1');
     expect(event.taskId).toBe('task-1');
     expect([...event.recipientIds].sort()).toEqual(['e2', 'm1']);
@@ -181,6 +182,26 @@ describe('ChatNotificationRouter.notifyNewMessage', () => {
     });
 
     expect(emit.mock.calls[0]![0].eventKey).toBe('chat-msg:msg-1');
+  });
+
+  it('добавляет название задачи и имя автора в подробный payload сообщения', async () => {
+    const { router, emit } = createRouter({ users: [userStub('e2', Role.EXECUTOR)] });
+
+    await router.notifyNewMessage({
+      taskId: 'task-1',
+      taskTitle: 'Подготовить отчёт',
+      messageId: 'msg-1',
+      authorId: 'e1',
+      authorDisplayName: 'Иван Петров',
+      executorIds: ['e2'],
+      managerIds: [],
+    });
+
+    expect(emit.mock.calls[0]![0].payload).toEqual({
+      authorId: 'e1',
+      taskTitle: 'Подготовить отчёт',
+      authorDisplayName: 'Иван Петров',
+    });
   });
 });
 

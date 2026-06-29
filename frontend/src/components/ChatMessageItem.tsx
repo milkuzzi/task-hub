@@ -1,21 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { formatMsk } from '@/lib/time';
-import { MESSAGE_TEXT_BOUNDS, type ChatMessage, type MessageReader } from '@/lib/chat-api';
-import { AttachmentThumbnail } from './AttachmentThumbnail';
-import { UserAvatar } from './UserAvatar';
-import type { AttachmentMeta } from '@/lib/chat-api';
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { formatMsk } from "@/lib/time";
+import {
+  MESSAGE_TEXT_BOUNDS,
+  type ChatMessage,
+  type MessageReader,
+} from "@/lib/chat-api";
+import { AttachmentThumbnail } from "./AttachmentThumbnail";
+import { UserAvatar } from "./UserAvatar";
+import type { AttachmentMeta } from "@/lib/chat-api";
 
 /**
  * Одно Сообщение Чата в ленте (Req 11.3, 11.5, 11.7, 11.8).
  *
  * Отображает автора, текст и время в MSK; для изменённого Сообщения — метку
  * «изменено {дата/время}» (Req 11.5), для удалённого — метку «Сообщение
- * удалено» на месте текста (Req 11.7). Автор Сообщения, Менеджер Задачи и
- * Администратор видят действия «Изменить»/«Удалить» (право проверяется и на
- * сервере, Req 11.6). Список прочитавших раскрывается по запросу и виден всем
- * Участникам чата (Req 11.8). Вложения Сообщения показываются миниатюрами или
- * значками (Req 12.6, 12.7).
+ * удалено» на месте текста (Req 11.7). Автор Сообщения, Администратор и
+ * Менеджер Задачи видят действия «Изменить»/«Удалить», но Менеджер не может
+ * менять Сообщения Администратора (право проверяется и на сервере, Req 11.6).
+ * Список прочитавших раскрывается по запросу и виден всем Участникам чата (Req
+ * 11.8). Вложения Сообщения показываются миниатюрами или значками (Req 12.6,
+ * 12.7).
  */
 export interface ChatMessageItemProps {
   message: ChatMessage;
@@ -70,8 +75,11 @@ export function ChatMessageItem({
 
   async function handleSave(): Promise<void> {
     const text = draft.trim();
-    if (text.length < MESSAGE_TEXT_BOUNDS.min || text.length > MESSAGE_TEXT_BOUNDS.max) {
-      setError(t('chat.errors.length'));
+    if (
+      text.length < MESSAGE_TEXT_BOUNDS.min ||
+      text.length > MESSAGE_TEXT_BOUNDS.max
+    ) {
+      setError(t("chat.errors.length"));
       return;
     }
     setBusy(true);
@@ -80,7 +88,7 @@ export function ChatMessageItem({
       await onEdit(message.id, text);
       setEditing(false);
     } catch {
-      setError(t('errors.generic'));
+      setError(t("errors.generic"));
     } finally {
       setBusy(false);
     }
@@ -105,7 +113,9 @@ export function ChatMessageItem({
 
   const attachments = message.attachments ?? [];
   const hasAuthorAvatar =
-    message.authorAvatarPath === undefined ? undefined : message.authorAvatarPath !== null;
+    message.authorAvatarPath === undefined
+      ? undefined
+      : message.authorAvatarPath !== null;
 
   // Отображаемый счётчик прочитавших — лучшая из известных оценок: реактивный
   // `readCount` (обновляется по `chat:reads` без раскрытия списка, Property 9),
@@ -120,7 +130,9 @@ export function ChatMessageItem({
   );
 
   return (
-    <article className={message.deleted ? 'chat-msg chat-msg--deleted' : 'chat-msg'}>
+    <article
+      className={message.deleted ? "chat-msg chat-msg--deleted" : "chat-msg"}
+    >
       <header className="chat-msg__head">
         <span className="chat-msg__identity">
           <UserAvatar
@@ -137,7 +149,7 @@ export function ChatMessageItem({
       </header>
 
       {message.deleted ? (
-        <p className="chat-msg__deleted">{t('chat.deleted')}</p>
+        <p className="chat-msg__deleted">{t("chat.deleted")}</p>
       ) : editing ? (
         <div className="stack">
           {error !== null && (
@@ -160,7 +172,7 @@ export function ChatMessageItem({
               disabled={busy}
               onClick={() => void handleSave()}
             >
-              {busy ? t('common.saving') : t('chat.save')}
+              {busy ? t("common.saving") : t("chat.save")}
             </button>
             <button
               className="btn btn--sm"
@@ -168,16 +180,18 @@ export function ChatMessageItem({
               disabled={busy}
               onClick={() => setEditing(false)}
             >
-              {t('chat.cancelEdit')}
+              {t("chat.cancelEdit")}
             </button>
           </div>
         </div>
       ) : (
         <>
-          {message.text.trim() !== '' && <p className="chat-msg__text">{message.text}</p>}
+          {message.text.trim() !== "" && (
+            <p className="chat-msg__text">{message.text}</p>
+          )}
           {message.editedAt !== null && (
             <span className="chat-msg__edited">
-              {t('chat.editedMark', { at: formatMsk(message.editedAt) })}
+              {t("chat.editedMark", { at: formatMsk(message.editedAt) })}
             </span>
           )}
           {attachments.length > 0 && (
@@ -196,8 +210,12 @@ export function ChatMessageItem({
 
       {!message.deleted && (
         <footer className="chat-msg__foot">
-          <button className="chat-msg__link" type="button" onClick={toggleReaders}>
-            {t('chat.readers.toggle', { count: readersCount })}
+          <button
+            className="chat-msg__link"
+            type="button"
+            onClick={toggleReaders}
+          >
+            {t("chat.readers.toggle", { count: readersCount })}
           </button>
           {canModify && !editing && (
             <span className="row-actions">
@@ -207,7 +225,7 @@ export function ChatMessageItem({
                 disabled={busy}
                 onClick={() => setEditing(true)}
               >
-                {t('chat.edit')}
+                {t("chat.edit")}
               </button>
               <button
                 className="chat-msg__link chat-msg__link--danger"
@@ -215,7 +233,7 @@ export function ChatMessageItem({
                 disabled={busy}
                 onClick={() => void handleDelete()}
               >
-                {t('chat.delete')}
+                {t("chat.delete")}
               </button>
             </span>
           )}
@@ -224,18 +242,18 @@ export function ChatMessageItem({
 
       {showReaders && (
         <div className="chat-msg__readers">
-          <strong>{t('chat.readers.heading')}</strong>
+          <strong>{t("chat.readers.heading")}</strong>
           {readers === undefined ? (
-            <p className="text-muted">{t('common.loading')}</p>
+            <p className="text-muted">{t("common.loading")}</p>
           ) : readers.length === 0 ? (
-            <p className="text-muted">{t('chat.readers.none')}</p>
+            <p className="text-muted">{t("chat.readers.none")}</p>
           ) : (
             <ul className="chat-readers__list">
               {readers.map((r) => (
                 <li key={r.userId}>
-                  {r.displayName}{' '}
+                  {r.displayName}{" "}
                   <span className="text-muted">
-                    ({t('chat.readers.at', { at: formatMsk(r.readAt) })})
+                    ({t("chat.readers.at", { at: formatMsk(r.readAt) })})
                   </span>
                 </li>
               ))}

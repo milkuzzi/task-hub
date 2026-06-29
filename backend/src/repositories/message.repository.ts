@@ -11,14 +11,15 @@ import { BaseRepository } from './base.repository';
  * Используется REST-слоем истории Чата: лента Сообщений отдаётся клиенту с
  * прикреплёнными Вложениями за один запрос, без дополнительных обращений к
  * хранилищу на каждое Сообщение. Дополнительно подгружается признак аватара
- * автора (`author.avatarPath`), чтобы лента могла показать аватар автора рядом
- * с Сообщением (дефект 4). Из автора выбираются только `id` и `avatarPath` —
- * прочие поля профиля наружу не нужны и не запрашиваются.
+ * автора (`author.avatarPath`) и его роль (`author.role`), чтобы лента могла
+ * показать аватар автора и применить клиентские ограничения действий рядом с
+ * Сообщением (дефект 4, Req 11.6). Из автора выбираются только поля, нужные
+ * контракту ленты.
  */
 export type MessageWithAttachments = Prisma.MessageGetPayload<{
   include: {
     attachments: true;
-    author: { select: { id: true; avatarPath: true } };
+    author: { select: { id: true; avatarPath: true; role: true } };
     _count: { select: { reads: true } };
   };
 }>;
@@ -26,7 +27,7 @@ export type MessageWithAttachments = Prisma.MessageGetPayload<{
 /** Подгрузка Сообщения вместе с Вложениями, данными аватара автора и числом прочитавших. */
 const MESSAGE_WITH_ATTACHMENTS_INCLUDE = {
   attachments: true,
-  author: { select: { id: true, avatarPath: true } },
+  author: { select: { id: true, avatarPath: true, role: true } },
   _count: { select: { reads: true } },
 } satisfies Prisma.MessageInclude;
 

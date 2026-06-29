@@ -14,7 +14,7 @@ import {
 import { AccessDeniedException } from '../common/errors';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { ChatService } from './chat.service';
-import { EditMessageDto, SendMessageDto } from './dto';
+import { EditMessageDto, SendMessageDto, UpdateChatMuteDto } from './dto';
 import {
   ChatMessageHttpView,
   MessageReaderHttpView,
@@ -61,6 +61,24 @@ export class ChatController {
     const userId = this.principal(req).userId;
     const messages = await this.chatService.listMessages(userId, taskId);
     return messages.map((message) => toChatMessage(message, taskId));
+  }
+
+  @Get('tasks/:id/max-notifications')
+  async getMaxNotifications(
+    @Param('id') taskId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ muted: boolean }> {
+    return { muted: await this.chatService.isMuted(this.principal(req).userId, taskId) };
+  }
+
+  @Patch('tasks/:id/max-notifications')
+  async updateMaxNotifications(
+    @Param('id') taskId: string,
+    @Body() dto: UpdateChatMuteDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ muted: boolean }> {
+    await this.chatService.setMute(this.principal(req).userId, taskId, dto.muted);
+    return { muted: dto.muted };
   }
 
   /**

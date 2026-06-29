@@ -53,12 +53,28 @@ describe('MaxOAuthHttpClient (Req 16.1, 16.3)', () => {
 
     expect(maxUserId).toBe('max-777');
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const [tokenUrl] = fetchMock.mock.calls[0];
+    const [tokenUrl, tokenInit] = fetchMock.mock.calls[0];
     expect(tokenUrl).toBe('https://api.max.example.com/oauth/token');
+    expect(JSON.parse((tokenInit as RequestInit).body as string)).toMatchObject({
+      redirect_uri: 'https://app.example.com/auth/max/callback',
+    });
     const [userInfoUrl, userInfoInit] = fetchMock.mock.calls[1];
     expect(userInfoUrl).toBe('https://api.max.example.com/oauth/userinfo');
     expect((userInfoInit as RequestInit).headers).toMatchObject({
       Authorization: 'Bearer tok',
+    });
+  });
+
+  it('использует redirectUri, переданный для конкретного OAuth callback', async () => {
+    fetchMock
+      .mockResolvedValueOnce(okJson({ access_token: 'tok' }))
+      .mockResolvedValueOnce(okJson({ id: 'max-777' }));
+
+    await client.exchangeAuthCode('auth-code', 'https://app.example.com/profile/max/callback');
+
+    const [, tokenInit] = fetchMock.mock.calls[0];
+    expect(JSON.parse((tokenInit as RequestInit).body as string)).toMatchObject({
+      redirect_uri: 'https://app.example.com/profile/max/callback',
     });
   });
 

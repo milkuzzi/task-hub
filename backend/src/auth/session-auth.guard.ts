@@ -1,11 +1,17 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
-import { Request } from 'express';
 import { AuthenticationException } from '../common/errors';
 import { AuthPrincipal } from './auth.types';
+import { readSessionCookie } from './session-cookie';
 import { SessionTokenService } from './session-token.service';
 
 /** HTTP-запрос с присоединённым аутентифицированным субъектом. */
-export interface AuthenticatedRequest extends Request {
+export interface AuthenticatedRequest {
+  /** HTTP-заголовки запроса. */
+  headers: Record<string, string | string[] | undefined>;
+  /** IP-адрес клиента, если adapter смог его определить. */
+  ip?: string;
+  /** Низкоуровневый socket для fallback-определения IP. */
+  socket?: { remoteAddress?: string };
   /** Субъект, установленный {@link SessionAuthGuard} после проверки токена. */
   user?: AuthPrincipal;
 }
@@ -13,10 +19,12 @@ export interface AuthenticatedRequest extends Request {
 /**
  * Guard проверки валидности сессии при каждом HTTP-запросе (Req 5.7, 19.10).
  *
- * Извлекает access-токен из заголовка `Authorization: Bearer <token>`,
- * проверяет его подпись/срок и валидность сессии через
- * {@link SessionTokenService.verify}. При успехе присоединяет
- * {@link AuthPrincipal} к запросу (`request.user`); иначе отклоняет запрос
+ * Извлекает access-токен из legacy заголовка `Authorization: Bearer <token>`
+ * либо из HttpOnly cookie `taskhub_session`, проверяет его подпись/срок и
+ * валидность сессии через {@link SessionTokenService.verify}. Явный Bearer
+ * имеет приоритет над cookie, чтобы MAX mini-app не ломалась из-за устаревшей
+ * браузерной cookie сайта. При успехе присоединяет {@link AuthPrincipal} к
+ * запросу (`request.user`); иначе отклоняет запрос
  * {@link AuthenticationException} (401). Аннулированные сессии перестают
  * проходить проверку немедленно, без ожидания истечения токена (Req 19.10).
  */
@@ -26,7 +34,9 @@ export class SessionAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const token = this.extractBearerToken(request.headers.authorization);
+    const token =
+      this.extractBearerToken(firstHeaderValue(request.headers.authorization)) ??
+      readSessionCookie(firstHeaderValue(request.headers.cookie));
     if (token === null) {
       throw new AuthenticationException('Требуется вход в систему.');
     }
@@ -49,4 +59,8 @@ export class SessionAuthGuard implements CanActivate {
     }
     return value.trim();
   }
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

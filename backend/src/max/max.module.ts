@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common';
-import { AttachmentsModule } from '../attachments';
-import { ChatModule } from '../chat';
-import { TasksModule } from '../tasks';
+import { AuthModule } from '../auth';
+import { SecurityModule } from '../security';
 import { MaxOAuthModule } from './oauth';
-import {
-  MAX_BOT_API_PORT,
-  MaxBotService,
-  MaxBotWebhookController,
-  MaxBotWebhookGuard,
-  UnavailableMaxBotApiAdapter,
-} from './bot';
+import { MAX_BOT_API_PORT } from './bot/max-bot-api.port';
+import { MaxBotHttpApiAdapter } from './bot/max-bot-http.adapter';
+import { MaxBotAuthController } from './bot/max-bot-auth.controller';
+import { MaxBotAuthService } from './bot/max-bot-auth.service';
+import { MaxBotUpdateController } from './bot/max-bot.update.controller';
+import { MaxBotWebhookRegistrar } from './bot/max-bot-webhook.registrar';
+import { MaxBotWebhookGuard } from './bot/max-bot-webhook.guard';
+import { MaxMiniAppAuthController, MaxMiniAppAuthService } from './mini-app';
 
 /**
  * Модуль интеграции с платформой MAX (Req 16).
@@ -21,32 +21,27 @@ import {
  *   `MAX_OAUTH_PORT`. {@link import('../auth').AuthModule} зависит напрямую от
  *   {@link MaxOAuthModule}, поэтому вход через MAX не вовлекает Бот MAX и его
  *   зависимости (Чат/Задачи/Вложения).
- * - **Бот MAX** (Req 16.4–16.13) — {@link MaxBotService} (идентификация
- *   Пользователя по профилю MAX и делегирование существующим сервисам Задач,
- *   Чата и Вложений) и {@link MaxBotWebhookController} (приём входящих обновлений
- *   и маршрутизация в сервис, Req 16.4). Исходящее взаимодействие с Bot API MAX
- *   абстрагировано портом {@link MAX_BOT_API_PORT} (по умолчанию — безопасная
- *   заглушка {@link UnavailableMaxBotApiAdapter} до подключения реальной
- *   интеграции).
+ * - **Mini-app и Бот MAX** — подписанные данные запуска обмениваются на обычную
+ *   Сессию Системы, а Бот оставляет только подтверждение привязки, доставку
+ *   Уведомлений и кнопку запуска mini-app. Исходящее взаимодействие с Bot API
+ *   абстрагировано портом {@link MAX_BOT_API_PORT}.
  *
  * Фильтрация доставки Уведомлений через Бот MAX по отпискам/заглушению
  * (Req 16.5, 16.6, 16.9, 16.13) реализована в `NotificationsModule`
- * (`MaxDeliveryFilter`) на пути доставки в MAX; команды Бота лишь изменяют
- * состояние отписок (`MaxLink.mutedAll`) и заглушения (`ChatMute`).
- *
- * Зависимости Бота ({@link TasksModule}, {@link ChatModule},
- * {@link AttachmentsModule}) предоставляют прикладные сервисы; репозитории и
- * конфигурация доступны через глобальные модули.
+ * (`MaxDeliveryFilter`) на пути доставки в MAX; настройки меняются через
+ * авторизованные API профиля и Задачи.
  */
 @Module({
-  imports: [MaxOAuthModule, TasksModule, ChatModule, AttachmentsModule],
-  controllers: [MaxBotWebhookController],
+  imports: [MaxOAuthModule, AuthModule, SecurityModule],
+  controllers: [MaxBotUpdateController, MaxBotAuthController, MaxMiniAppAuthController],
   providers: [
-    MaxBotService,
+    MaxBotAuthService,
     MaxBotWebhookGuard,
-    UnavailableMaxBotApiAdapter,
-    { provide: MAX_BOT_API_PORT, useExisting: UnavailableMaxBotApiAdapter },
+    MaxBotHttpApiAdapter,
+    MaxBotWebhookRegistrar,
+    MaxMiniAppAuthService,
+    { provide: MAX_BOT_API_PORT, useExisting: MaxBotHttpApiAdapter },
   ],
-  exports: [MaxOAuthModule, MaxBotService],
+  exports: [MaxOAuthModule, MaxBotAuthService],
 })
 export class MaxIntegrationModule {}

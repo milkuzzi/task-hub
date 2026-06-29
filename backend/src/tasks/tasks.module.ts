@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '../audit';
 import { AuthModule } from '../auth';
-import { NotificationsModule } from '../notifications';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SearchModule } from '../search';
 import { StatusModule } from '../status';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
+import { TaskRealtimeDispatcher } from './task-realtime.dispatcher';
 
 /**
  * Модуль управления Задачами (Req 9, 10.12, 10.13, 20).
@@ -29,7 +30,7 @@ import { TasksService } from './tasks.service';
 @Module({
   imports: [AuditLogModule, NotificationsModule, AuthModule, SearchModule, StatusModule],
   controllers: [TasksController],
-  providers: [TasksService],
-  exports: [TasksService],
+  providers: [TasksService, TaskRealtimeDispatcher],
+  exports: [TasksService, TaskRealtimeDispatcher],
 })
 export class TasksModule {}

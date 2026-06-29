@@ -38,7 +38,9 @@ import { AttachmentMetaView, ChatMessageHttpView, toAttachmentMeta } from './cha
  * Несёт денормализованное имя автора на момент создания (Req 8.4), метку
  * «изменено» (`editedAt`, Req 11.5) и признак удаления (`deleted`, Req 11.7) —
  * по `deleted` клиент отображает на месте Сообщения метку «Сообщение удалено».
- * Поле `taskId` добавляется для адресации Сообщения к комнате Задачи на клиенте.
+ * Поле `taskId` добавляется для адресации Сообщения к комнате Задачи на
+ * клиенте; `authorRole` нужно клиенту, чтобы Менеджер Задачи не видел действия
+ * изменения у Сообщений Администратора.
  */
 export interface ChatMessageView {
   id: string;
@@ -46,6 +48,7 @@ export interface ChatMessageView {
   chatId: string;
   authorId: string | null;
   authorDisplayName: string;
+  authorRole?: Role | null;
   authorAvatarPath?: string | null;
   text: string;
   createdAt: Date;
@@ -238,6 +241,7 @@ export class ChatService {
       taskId,
       linkIds,
       sender.avatarPath ?? null,
+      sender.role,
     );
     this.gateway.broadcastMessage(taskId, view);
     this.gateway.broadcastMessageCounter(taskId, { taskId, messageCount: outcome.messageCount });
@@ -253,11 +257,15 @@ export class ChatService {
       });
       this.gateway.broadcastStatus(taskId, { taskId, status: outcome.status });
     }
+    // Даже если Сообщение автоматически изменило Статус, бизнес-событие для
+    // клиентов и уведомлений остаётся событием Чата: отдельное уведомление
+    // «Статус задачи изменён» здесь не формируется.
+    void this.broadcastTaskChanged(task, 'message');
 
     // Уведомление участникам о новом Сообщении (кроме автора и Администраторов,
     // Req 14.1, 14.2). Best-effort: сбой постановки уведомления в очередь не
     // должен влиять на уже сохранённое и разосланное Сообщение.
-    await this.routeNewMessageNotification(task, outcome.message.id, sender.id);
+    await this.routeNewMessageNotification(task, outcome.message.id, sender.id, sender.displayName);
 
     this.logger.log(
       `Сообщение «${outcome.message.id}» отправлено в задачу «${taskId}» пользователем ` +
@@ -299,14 +307,16 @@ export class ChatService {
       throw new EntityNotFoundException('Сообщение удалено и не может быть изменено.');
     }
 
-    this.assertCanModify(actor.id, actor.role, message.authorId, task);
+    const messageAuthor =
+      message.authorId === null ? null : await this.userRepository.findById(message.authorId);
+    this.assertCanModify(actor.id, actor.role, message.authorId, messageAuthor?.role ?? null, task);
 
     const updated = await this.messageRepository.update(messageId, {
       text: validText,
       editedAt: this.clock.now(),
     });
 
-    const view = this.toView(updated, task.id);
+    const view = this.toView(updated, task.id, messageAuthor?.role ?? null);
     this.gateway.broadcastMessage(task.id, view);
 
     this.logger.log(
@@ -319,12 +329,13 @@ export class ChatService {
    * Удаляет Сообщение, помечая его меткой «Сообщение удалено», и удаляет
    * связанные Вложения вместе с их файлами (Req 11.6, 11.7, 2.8).
    *
-   * Право на удаление имеют только автор Сообщения, Менеджер этой Задачи и
-   * Администратор; иной Участник чата получает отказ, а Сообщение сохраняется
-   * без изменений (Req 11.6). Удаление Сообщения логическое: запись остаётся в
-   * ленте, но помечается `deleted`, по которому на её месте отображается метка
-   * «Сообщение удалено» (Req 11.7). Счётчик Сообщений Задачи при этом не
-   * меняется — удалённые Сообщения остаются в ленте (Req 9.7).
+   * Право на удаление имеют только автор Сообщения, Администратор и Менеджер
+   * этой Задачи, кроме Сообщений Администратора; иной Участник чата получает
+   * отказ, а Сообщение сохраняется без изменений (Req 11.6). Удаление Сообщения
+   * логическое: запись остаётся в ленте, но помечается `deleted`, по которому на
+   * её месте отображается метка «Сообщение удалено» (Req 11.7). Счётчик
+   * Сообщений Задачи при этом не меняется — удалённые Сообщения остаются в ленте
+   * (Req 9.7).
    *
    * Дефект 8: если у Сообщения есть Вложения, они и их файлы не должны
    * оставаться осиротевшими. В одной транзакции выбираются связанные Вложения,
@@ -342,11 +353,16 @@ export class ChatService {
    */
   async deleteMessage(actorId: string, messageId: string): Promise<void> {
     const { message, task, actor } = await this.loadMessageContext(actorId, messageId);
-    this.assertCanModify(actor.id, actor.role, message.authorId, task);
+    const messageAuthor =
+      message.authorId === null ? null : await this.userRepository.findById(message.authorId);
+    this.assertCanModify(actor.id, actor.role, message.authorId, messageAuthor?.role ?? null, task);
 
     if (message.deleted) {
       // Идемпотентность: повторное удаление не меняет состояние, но синхронизирует клиентов.
-      this.gateway.broadcastMessage(task.id, this.toView(message, task.id));
+      this.gateway.broadcastMessage(
+        task.id,
+        this.toView(message, task.id, messageAuthor?.role ?? null),
+      );
       return;
     }
 
@@ -377,7 +393,10 @@ export class ChatService {
       updated = await this.messageRepository.update(messageId, { deleted: true });
     }
 
-    this.gateway.broadcastMessage(task.id, this.toView(updated, task.id));
+    this.gateway.broadcastMessage(
+      task.id,
+      this.toView(updated, task.id, messageAuthor?.role ?? null),
+    );
 
     this.logger.log(
       `Сообщение «${messageId}» удалено пользователем «${actorId}»; ` +
@@ -560,6 +579,12 @@ export class ChatService {
     );
   }
 
+  /** Возвращает настройку доставки MAX для доступной пользователю задачи. */
+  async isMuted(userId: string, taskId: string): Promise<boolean> {
+    const { task } = await this.loadParticipantTaskContext(userId, taskId);
+    return this.chatMuteRepository.isMuted(userId, task.id);
+  }
+
   /**
    * Проверяет допустимость привязки ранее загруженных Вложений к отправляемому
    * Сообщению (Req 11.9, 12.1–12.5) ДО его сохранения.
@@ -695,6 +720,7 @@ export class ChatService {
     task: TaskWithAssignments,
     messageId: string,
     authorId: string,
+    authorDisplayName: string,
   ): Promise<void> {
     const executorIds = task.assignments
       .filter((a) => a.kind === AssignmentKind.EXECUTOR)
@@ -708,6 +734,7 @@ export class ChatService {
         taskTitle: task.title,
         messageId,
         authorId,
+        authorDisplayName,
         executorIds,
         managerIds,
       });
@@ -715,6 +742,37 @@ export class ChatService {
       this.logger.warn(
         `Не удалось поставить уведомление о новом сообщении «${messageId}» задачи ` +
           `«${task.id}»: ${error instanceof Error ? error.message : String(error)}.`,
+      );
+    }
+  }
+
+  /** Рассылает лёгкое событие изменения Задачи для реактивных списков Задач. */
+  private async broadcastTaskChanged(
+    task: TaskWithAssignments,
+    reason: 'message' | 'status',
+  ): Promise<void> {
+    try {
+      const userRepository = this.userRepository as UserRepository & {
+        listActiveWithMaxLink?: UserRepository['listActiveWithMaxLink'];
+      };
+      const admins =
+        typeof userRepository.listActiveWithMaxLink === 'function'
+          ? await userRepository.listActiveWithMaxLink()
+          : [];
+      const adminIds = admins.filter((user) => user.role === Role.ADMIN).map((user) => user.id);
+      const participantIds = task.assignments.map((assignment) => assignment.userId);
+      const gateway = this.gateway as ChatGateway & {
+        broadcastTaskUpdated?: ChatGateway['broadcastTaskUpdated'];
+      };
+      if (typeof gateway.broadcastTaskUpdated === 'function') {
+        gateway.broadcastTaskUpdated(task.id, { taskId: task.id, reason }, [
+          ...new Set([...participantIds, ...adminIds]),
+        ]);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Не удалось отправить realtime-событие изменения Задачи «${task.id}»: ` +
+          `${error instanceof Error ? error.message : String(error)}.`,
       );
     }
   }
@@ -819,16 +877,18 @@ export class ChatService {
   }
 
   /**
-   * Проверяет право на редактирование/удаление Сообщения: автор, Менеджер
-   * Задачи или Администратор (Req 11.5, 11.6, 11.7).
+   * Проверяет право на редактирование/удаление Сообщения: автор, Администратор
+   * или Менеджер Задачи, кроме Сообщений Администратора (Req 11.5, 11.6, 11.7).
    *
-   * @throws AccessDeniedException Если инициатор не автор, не Менеджер этой
-   *   Задачи и не Администратор (Req 11.6).
+   * @throws AccessDeniedException Если инициатор не автор, не Администратор и не
+   *   Менеджер этой Задачи, либо Менеджер пытается изменить Сообщение
+   *   Администратора (Req 11.6).
    */
   private assertCanModify(
     actorId: string,
     actorRole: Role,
     authorId: string | null,
+    authorRole: Role | null,
     task: TaskWithAssignments,
   ): void {
     if (authorId !== null && authorId === actorId) {
@@ -841,6 +901,11 @@ export class ChatService {
       (a) => a.userId === actorId && a.kind === AssignmentKind.MANAGER,
     );
     if (isTaskManager) {
+      if (authorRole === Role.ADMIN) {
+        throw new AccessDeniedException(
+          'Менеджер задачи не может изменять сообщения Администратора.',
+        );
+      }
       return; // Менеджер этой Задачи (Req 11.6).
     }
     throw new AccessDeniedException(
@@ -926,6 +991,7 @@ export class ChatService {
    * @param message Сохранённое Сообщение.
    * @param taskId Идентификатор Задачи, к Чату которой относится Сообщение.
    * @param attachmentIds Идентификаторы привязанных к Сообщению Вложений.
+   * @param authorRole Роль автора на момент отправки Сообщения.
    * @returns Представление Сообщения с Вложениями для клиента.
    */
   private async buildSentMessageView(
@@ -933,6 +999,7 @@ export class ChatService {
     taskId: string,
     attachmentIds: string[],
     authorAvatarPath: string | null,
+    authorRole: Role,
   ): Promise<ChatMessageHttpView> {
     const view: ChatMessageHttpView = {
       id: message.id,
@@ -941,6 +1008,7 @@ export class ChatService {
       authorId: message.authorId,
       authorDisplayName: message.authorDisplayName,
       authorAvatarPath,
+      authorRole,
       // Свежеотправленное Сообщение ещё никто не прочитал.
       readCount: 0,
       text: message.text,
@@ -967,13 +1035,18 @@ export class ChatService {
   }
 
   /** Формирует представление Сообщения для рассылки в комнату Задачи. */
-  private toView(message: Message, taskId: string): ChatMessageView {
+  private toView(
+    message: Message,
+    taskId: string,
+    authorRole: Role | null = null,
+  ): ChatMessageView {
     return {
       id: message.id,
       taskId,
       chatId: message.chatId,
       authorId: message.authorId,
       authorDisplayName: message.authorDisplayName,
+      authorRole,
       text: message.text,
       createdAt: message.createdAt,
       editedAt: message.editedAt,

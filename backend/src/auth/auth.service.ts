@@ -268,6 +268,16 @@ export class AuthService {
    *   блокировке учётной записи.
    */
   async login(email: string, password: string, ip: string): Promise<AuthSession> {
+    const user = await this.authenticateCredentials(email, password, ip);
+    return this.sessionTokens.issue(user);
+  }
+
+  /**
+   * Проверяет пароль с теми же счётчиками и блокировками, что обычный вход,
+   * но не выпускает сессию. Нужен доверенным составным сценариям, где перед
+   * выпуском сессии требуется атомарно завершить дополнительную привязку.
+   */
+  async authenticateCredentials(email: string, password: string, ip: string): Promise<User> {
     const now = this.clock.now();
     const user = await this.userRepository.findActiveByEmail(email);
 
@@ -297,7 +307,7 @@ export class AuthService {
       await this.userRepository.update(user.id, { failedLoginCount: 0, lockedUntil: null });
     }
 
-    return this.sessionTokens.issue(user);
+    return user;
   }
 
   /**
@@ -368,10 +378,13 @@ export class AuthService {
    *   профиль MAX не привязан к учётной записи либо связанная учётная запись
    *   недоступна (удалена/не активирована) (Req 16.3).
    */
-  async loginWithMax(maxAuthCode: string): Promise<AuthSession> {
+  async loginWithMax(maxAuthCode: string, redirectUri?: string): Promise<AuthSession> {
     let maxUserId: string;
     try {
-      maxUserId = await this.maxOAuth.exchangeAuthCode(maxAuthCode);
+      maxUserId =
+        redirectUri === undefined
+          ? await this.maxOAuth.exchangeAuthCode(maxAuthCode)
+          : await this.maxOAuth.exchangeAuthCode(maxAuthCode, redirectUri);
     } catch (error) {
       // Любой неуспех обмена на стороне MAX — отказ во входе без раскрытия
       // деталей (Req 16.3). Подробности фиксируем только в журнале.

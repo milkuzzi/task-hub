@@ -27,12 +27,14 @@ interface NotificationItemProps {
   onSeen: (messageId: string) => void;
   /** Ручное снятие уведомления Пользователем. */
   onDismiss: (notificationId: string) => void;
+  onOpen?: (taskId: string) => void;
 }
 
 export function NotificationItem({
   notification,
   onSeen,
   onDismiss,
+  onOpen,
 }: NotificationItemProps): JSX.Element {
   const { t } = useTranslation();
   const ref = useRef<HTMLLIElement | null>(null);
@@ -94,6 +96,15 @@ export function NotificationItem({
         <span className="notif-item__time">{formatMsk(notification.createdAt)}</span>
       </div>
       <div className="notif-item__actions">
+        {notification.taskId !== null && onOpen !== undefined && (
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            onClick={() => onOpen(notification.taskId as string)}
+          >
+            Открыть
+          </button>
+        )}
         <button
           type="button"
           className="btn btn--sm"

@@ -35,11 +35,23 @@ function emptyPage(): Page<Task> {
 
 function buildService(user: User | null) {
   const findActiveById = jest.fn(async () => user);
-  let listArgs: { pagination: PaginationQueryDto; where: Prisma.TaskWhereInput } | undefined;
-  const list = jest.fn(async (pagination: PaginationQueryDto, where: Prisma.TaskWhereInput) => {
-    listArgs = { pagination, where };
-    return emptyPage();
-  });
+  let listArgs:
+    | {
+        pagination: PaginationQueryDto;
+        where: Prisma.TaskWhereInput;
+        orderBy: Prisma.TaskOrderByWithRelationInput[];
+      }
+    | undefined;
+  const list = jest.fn(
+    async (
+      pagination: PaginationQueryDto,
+      where: Prisma.TaskWhereInput,
+      orderBy: Prisma.TaskOrderByWithRelationInput[],
+    ) => {
+      listArgs = { pagination, where, orderBy };
+      return emptyPage();
+    },
+  );
 
   const taskRepository = { list } as unknown as TaskRepository;
   const userRepository = { findActiveById } as unknown as UserRepository;
@@ -116,6 +128,34 @@ describe('SearchService.search — пагинация (Req 18.5)', () => {
     const { pagination } = getListArgs()!;
     expect(pagination.page).toBe(3);
     expect(pagination.pageSize).toBe(50);
+  });
+});
+
+describe('SearchService.search — сортировка до пагинации', () => {
+  it('по умолчанию запрашивает ближайшие Дедлайны первыми', async () => {
+    const { service, getListArgs } = buildService(makeUser({ id: 'a', role: Role.ADMIN }));
+    await service.search('a', {});
+    expect(getListArgs()?.orderBy).toEqual([
+      { deadline: 'asc' },
+      { createdAt: 'desc' },
+      { id: 'asc' },
+    ]);
+  });
+
+  it('передаёт обратную сортировку по Статусу со стабильными ключами', async () => {
+    const { service, getListArgs } = buildService(makeUser({ id: 'a', role: Role.ADMIN }));
+    await service.search('a', { sortBy: 'status', sortDirection: 'desc' });
+    expect(getListArgs()?.orderBy).toEqual([
+      { status: 'desc' },
+      { deadline: 'asc' },
+      { id: 'asc' },
+    ]);
+  });
+
+  it('передаёт алфавитную сортировку Названия', async () => {
+    const { service, getListArgs } = buildService(makeUser({ id: 'a', role: Role.ADMIN }));
+    await service.search('a', { sortBy: 'title', sortDirection: 'asc' });
+    expect(getListArgs()?.orderBy).toEqual([{ title: 'asc' }, { deadline: 'asc' }, { id: 'asc' }]);
   });
 });
 

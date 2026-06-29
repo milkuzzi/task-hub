@@ -1,4 +1,4 @@
-import { Role, TaskStatus } from '@prisma/client';
+import { AssignmentKind, Role, TaskStatus } from '@prisma/client';
 import { ValidationException } from '../common/errors';
 import {
   buildSearchWhere,
@@ -115,6 +115,26 @@ describe('validateSearchQuery — целостный запрос (Req 18.7)', (
     expect(result.text).toBe('отчёт');
     expect(result.filters?.statuses).toEqual([TaskStatus.WAITING]);
   });
+
+  it('по умолчанию сортирует по ближайшему Дедлайну', () => {
+    expect(validateSearchQuery({})).toMatchObject({
+      sortBy: 'deadline',
+      sortDirection: 'asc',
+    });
+  });
+
+  it('принимает выбранное поле и направление сортировки', () => {
+    expect(validateSearchQuery({ sortBy: 'title', sortDirection: 'desc' })).toMatchObject({
+      sortBy: 'title',
+      sortDirection: 'desc',
+    });
+  });
+
+  it('отклоняет недопустимую сортировку до обращения к данным', () => {
+    expect(() => validateSearchQuery({ sortBy: 'createdAt' as 'deadline' })).toThrow(
+      ValidationException,
+    );
+  });
 });
 
 describe('buildVisibilityWhere — видимость по доступу (Req 2.8–2.10)', () => {
@@ -178,6 +198,15 @@ describe('buildSearchWhere — конъюнкция видимости ∧ те�
     });
     expect((where.AND as unknown[])[0]).toEqual({
       assignments: { some: { userId: 'm1' } },
+    });
+  });
+
+  it('фильтрует по роли текущего Пользователя именно в этой Задаче', () => {
+    const where = buildSearchWhere('user-1', Role.MANAGER, {
+      filters: { assignmentKind: AssignmentKind.MANAGER },
+    });
+    expect(where.AND).toContainEqual({
+      assignments: { some: { userId: 'user-1', kind: AssignmentKind.MANAGER } },
     });
   });
 });

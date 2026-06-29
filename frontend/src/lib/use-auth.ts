@@ -1,5 +1,5 @@
-import { createContext, useContext } from 'react';
-import type { AuthSession, CurrentUser } from './auth-api';
+import { createContext, useContext } from "react";
+import type { AuthSession, CurrentUser } from "./auth-api";
 
 /**
  * Контекст и хук доступа к состоянию аутентификации.
@@ -17,8 +17,8 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   /** Вход по email/паролю (Req 5.7). */
   signIn: (email: string, password: string) => Promise<void>;
-  /** Вход через OAuth MAX (Req 16.1). */
-  signInWithMax: (authCode: string) => Promise<void>;
+  /** Вход через MAX: новый flow через Бота или legacy OAuth при переданном коде. */
+  signInWithMax: (authCode?: string, redirectUri?: string) => Promise<void>;
   /** Выход из Системы (Req 19.10). */
   signOut: () => Promise<void>;
   /** Обновить профиль в контексте (после смены аватара/привязки MAX). */
@@ -34,7 +34,7 @@ export const AuthContext = createContext<AuthContextValue | null>(null);
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (ctx === null) {
-    throw new Error('useAuth должен использоваться внутри <AuthProvider>');
+    throw new Error("useAuth должен использоваться внутри <AuthProvider>");
   }
   return ctx;
 }

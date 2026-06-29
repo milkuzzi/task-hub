@@ -26,6 +26,7 @@ export type Actor = 'EXECUTOR' | 'MANAGER' | 'ADMIN';
  */
 export type StatusAction =
   | { type: 'COMPLETE' } // Пометить «Выполнено» (Req 10.4)
+  | { type: 'START_WORK' } // Вернуть из «Ожидает» в «В работе»
   | { type: 'REOPEN' } // Переоткрыть из «Выполнено» (Req 10.5)
   | { type: 'CANCEL' } // Отменить (Req 10.6)
   | { type: 'RETURN' } // Вернуть из «Отменено» (Req 10.7)

@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Req, Res, StreamableFile, UseGuards } from '@nestjs/common';
-import { Response } from 'express';
 import { AccessDeniedException, ValidationException } from '../common/errors';
+import { setResponseHeaders, type HttpResponseLike } from '../common/http';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { UserRepository } from '../repositories';
 import { ExportFormat } from './statistics.export';
@@ -63,13 +63,13 @@ export class StatisticsController {
   async export(
     @Query() query: PeriodDto,
     @Req() req: AuthenticatedRequest,
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res: HttpResponseLike,
   ): Promise<StreamableFile> {
     const adminId = this.principal(req).userId;
     const period = this.requireDateRange(query);
     const format = this.resolveFormat(query.format);
     const file = await this.statisticsExportService.export(adminId, period, format);
-    res.set({
+    setResponseHeaders(res, {
       'Content-Type': file.mimeType,
       'Content-Disposition': `attachment; filename="${file.filename}"`,
     });

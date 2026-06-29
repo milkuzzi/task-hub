@@ -22,12 +22,14 @@ function buildService(
   restic: ResticBackupPort = {
     createDump: async () => ({ checksum: 'checksum' }),
   },
+  offsiteOverrides: Partial<OffsiteUploadPort> = {},
 ) {
   const create = jest.fn(async (input) => ({ id: 'record-1', ...input }) as BackupRecord);
   const records = { create } as unknown as BackupRecordRepository;
   const offsite = {
     upload: jest.fn(async () => undefined),
     computeUploadedChecksum: jest.fn(async () => 'checksum'),
+    ...offsiteOverrides,
   } as unknown as OffsiteUploadPort;
   const service = new BackupService(
     new ClockService({ now: () => NOW }),
@@ -66,6 +68,24 @@ describe('backup mode', () => {
     expect(result.result).toBe(BackupResult.FAILED);
     expect(result.reason).toContain('не сконфигурирован');
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ result: BackupResult.FAILED }));
+  });
+
+  it('records restic success when optional S3 manifest is not configured', async () => {
+    const restic = {
+      createDump: jest.fn(async () => ({ checksum: 'checksum-restic', snapshotId: 'snap-1' })),
+    } as unknown as ResticBackupPort;
+    const { service, create, offsite } = buildService('required', restic, {
+      isConfigured: () => false,
+    });
+
+    const result = await service.runDailyBackup();
+
+    expect(result.result).toBe(BackupResult.SUCCESS);
+    expect(result.checksum).toBe('checksum-restic');
+    expect(offsite.upload).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ result: BackupResult.SUCCESS, checksum: 'checksum-restic' }),
+    );
   });
 
   it('records a backup timeout as skipped', async () => {

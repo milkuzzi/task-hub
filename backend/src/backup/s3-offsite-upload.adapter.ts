@@ -43,6 +43,10 @@ export class S3OffsiteUploadAdapter implements OffsiteUploadPort {
 
   constructor(private readonly config: AppConfigService) {}
 
+  isConfigured(): boolean {
+    return this.hasCompleteConfig();
+  }
+
   /**
    * Выгружает манифест резервной копии в S3-совместимое хранилище (Req 21.4).
    *
@@ -114,19 +118,23 @@ export class S3OffsiteUploadAdapter implements OffsiteUploadPort {
    * (мягкая деградация при отсутствии — Req 21.5).
    */
   private requireConfig(): { bucket: string } {
-    const { endpoint, region, bucket, accessKeyId, secretAccessKey } = this.config.s3;
-    if (
-      endpoint === '' ||
-      region === '' ||
-      bucket === '' ||
-      accessKeyId === '' ||
-      secretAccessKey === ''
-    ) {
+    if (!this.hasCompleteConfig()) {
       throw new Error(
         'S3-совместимое хранилище для резервных копий не сконфигурировано: задайте S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID и S3_SECRET_ACCESS_KEY.',
       );
     }
-    return { bucket };
+    return { bucket: this.config.s3.bucket };
+  }
+
+  private hasCompleteConfig(): boolean {
+    const { endpoint, region, bucket, accessKeyId, secretAccessKey } = this.config.s3;
+    return (
+      endpoint !== '' &&
+      region !== '' &&
+      bucket !== '' &&
+      accessKeyId !== '' &&
+      secretAccessKey !== ''
+    );
   }
 
   /**

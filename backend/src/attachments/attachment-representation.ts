@@ -24,8 +24,7 @@ export type GenericIconType =
 
 /** Вид представления Вложения. */
 export type AttachmentRepresentation =
-  | { readonly kind: 'thumbnail' }
-  | { readonly kind: 'icon'; readonly icon: GenericIconType };
+  { readonly kind: 'thumbnail' } | { readonly kind: 'icon'; readonly icon: GenericIconType };
 
 /**
  * Определяет, относится ли MIME-тип к изображениям, поддерживающим превью
@@ -133,8 +132,14 @@ const SPREADSHEET_MIME_TYPES = new Set<string>([
 
 const PRESENTATION_MIME_TYPES = new Set<string>([
   'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint.presentation.macroenabled.12',
+  'application/vnd.ms-powerpoint.slideshow.macroenabled.12',
+  'application/vnd.ms-powerpoint.template.macroenabled.12',
   'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.presentation-template',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  'application/vnd.openxmlformats-officedocument.presentationml.template',
 ]);
 
 const DOCUMENT_MIME_TYPES = new Set<string>([

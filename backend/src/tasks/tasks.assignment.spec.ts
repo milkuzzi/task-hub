@@ -148,8 +148,7 @@ function matchesWhere(task: TaskWithAssignments, where: Prisma.TaskWhereInput): 
   }
   const some = (
     where.assignments as
-      | { some?: { userId?: string; kind?: AssignmentKind | { in?: AssignmentKind[] } } }
-      | undefined
+      { some?: { userId?: string; kind?: AssignmentKind | { in?: AssignmentKind[] } } } | undefined
   )?.some;
   if (some === undefined) {
     return true;
@@ -195,11 +194,7 @@ describe('TasksService.listVisible — видимость по роли и на�
         { userId: 'mgr', kind: AssignmentKind.MANAGER },
         { userId: 'other-exe', kind: AssignmentKind.EXECUTOR },
       ]),
-      t4: makeTask(
-        't4',
-        [{ userId: 'mgr', kind: AssignmentKind.EXECUTOR }],
-        TaskStatus.WAITING,
-      ),
+      t4: makeTask('t4', [{ userId: 'mgr', kind: AssignmentKind.EXECUTOR }], TaskStatus.WAITING),
       t5: makeTask(
         't5',
         [
@@ -330,11 +325,11 @@ describe('TasksService.assign — правила назначения (Req 2.4�
     await service.assign('mgrA', 't1', dto(['exe1', 'exe2'], ['mgrB']));
 
     expect(enqueueTaskAssigned.mock.calls.map(([event]) => event)).toEqual([
-      { taskId: 't1', userId: 'exe2', kind: AssignmentKind.EXECUTOR },
-      { taskId: 't1', userId: 'mgrB', kind: AssignmentKind.MANAGER },
+      { taskId: 't1', taskTitle: 'task-t1', userId: 'exe2', kind: AssignmentKind.EXECUTOR },
+      { taskId: 't1', taskTitle: 'task-t1', userId: 'mgrB', kind: AssignmentKind.MANAGER },
     ]);
     expect(enqueueTaskUnassigned.mock.calls.map(([event]) => event)).toEqual([
-      { taskId: 't1', userId: 'mgrA' },
+      { taskId: 't1', taskTitle: 'task-t1', userId: 'mgrA' },
     ]);
   });
 
@@ -342,6 +337,24 @@ describe('TasksService.assign — правила назначения (Req 2.4�
     const { service, getReplaced } = buildService(baseFixture());
     await service.assign('admin', 't1', dto(['exe1', 'mgrB'], ['mgrA']));
     expect(getReplaced()?.executorIds).toContain('mgrB');
+  });
+
+  it('отклоняет назначение Администратора исполнителем задачи', async () => {
+    const { service, replaceAssignments } = buildService(baseFixture());
+
+    await expect(service.assign('admin', 't1', dto(['admin'], ['mgrA']))).rejects.toBeInstanceOf(
+      ValidationException,
+    );
+    expect(replaceAssignments).not.toHaveBeenCalled();
+  });
+
+  it('отклоняет назначение Администратора менеджером задачи', async () => {
+    const { service, replaceAssignments } = buildService(baseFixture());
+
+    await expect(service.assign('admin', 't1', dto(['exe1'], ['admin']))).rejects.toBeInstanceOf(
+      ValidationException,
+    );
+    expect(replaceAssignments).not.toHaveBeenCalled();
   });
 
   it('Менеджер не может назначить Менеджера Исполнителем — состав не меняется (Req 2.6)', async () => {

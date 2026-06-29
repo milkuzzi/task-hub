@@ -141,12 +141,7 @@ describe('TaskNotifierAdapter assignment events', () => {
       kind: AssignmentKind.EXECUTOR,
     });
 
-    expect(notifyAssigned).toHaveBeenCalledWith(
-      'task-1',
-      'u1',
-      AssignmentKind.EXECUTOR,
-      undefined,
-    );
+    expect(notifyAssigned).toHaveBeenCalledWith('task-1', 'u1', AssignmentKind.EXECUTOR, undefined);
   });
 
   it('delegates unassignment notification to the router', async () => {

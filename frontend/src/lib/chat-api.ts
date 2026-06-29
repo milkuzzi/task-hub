@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, http } from "./api";
 
 /**
  * Типы и REST-вызовы Чата Задачи «Системы поручений» (Req 11.3–11.8, 11.10).
@@ -27,9 +27,12 @@ export const MESSAGE_TEXT_BOUNDS = { min: 1, max: 4000 } as const;
 
 /** Единый лимит размера загружаемого Вложения — 25 МБ (Req 12.2). */
 export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+const ATTACHMENT_UPLOAD_TIMEOUT_MS = 120_000;
 
 /** Максимум Вложений на одно Сообщение (Req 11.9). */
 export const ATTACHMENTS_PER_MESSAGE_MAX = 10;
+
+export type ChatAuthorRole = "ADMIN" | "MANAGER" | "EXECUTOR";
 
 /**
  * Представление Сообщения Чата (зеркалит серверный `ChatMessageView`).
@@ -45,6 +48,8 @@ export interface ChatMessage {
   chatId: string;
   authorId: string | null;
   authorDisplayName: string;
+  /** Роль автора, если запись Пользователя доступна; `null` для удалённого автора. */
+  authorRole?: ChatAuthorRole | null;
   /**
    * Относительный путь до аватара автора либо `null` (автор удалён/нет аватара,
    * Req 2.4). Признак наличия аватара; сами байты лента запрашивает по
@@ -126,6 +131,17 @@ export function listMessages(taskId: string): Promise<ChatMessage[]> {
   return api.get<ChatMessage[]>(`/tasks/${taskId}/messages`);
 }
 
+export function getTaskMaxNotifications(taskId: string): Promise<{ muted: boolean }> {
+  return api.get<{ muted: boolean }>(`/tasks/${taskId}/max-notifications`);
+}
+
+export function updateTaskMaxNotifications(
+  taskId: string,
+  muted: boolean,
+): Promise<{ muted: boolean }> {
+  return api.patch<{ muted: boolean }>(`/tasks/${taskId}/max-notifications`, { muted });
+}
+
 /**
  * Отправляет Сообщение в Чат Задачи (Req 11.3, 11.4).
  *
@@ -138,11 +154,17 @@ export function sendMessage(
   text: string,
   attachmentIds: string[] = [],
 ): Promise<ChatMessage> {
-  return api.post<ChatMessage>(`/tasks/${taskId}/messages`, { text, attachmentIds });
+  return api.post<ChatMessage>(`/tasks/${taskId}/messages`, {
+    text,
+    attachmentIds,
+  });
 }
 
 /** Редактирует текст Сообщения; сервер проставляет метку «изменено» (Req 11.5). */
-export function editMessage(messageId: string, text: string): Promise<ChatMessage> {
+export function editMessage(
+  messageId: string,
+  text: string,
+): Promise<ChatMessage> {
   return api.patch<ChatMessage>(`/messages/${messageId}`, { text });
 }
 
@@ -173,8 +195,15 @@ export function listAttachments(taskId: string): Promise<AttachmentMeta[]> {
  * прерванная загрузка не сохраняет частичный файл (Req 12.3, 12.4, 19.9). Файл
  * передаётся как `multipart/form-data` (клиент `api` снимает JSON-заголовок).
  */
-export function uploadAttachment(taskId: string, file: File): Promise<AttachmentMeta> {
+export function uploadAttachment(
+  taskId: string,
+  file: File,
+): Promise<AttachmentMeta> {
   const form = new FormData();
-  form.append('file', file, file.name);
-  return api.post<AttachmentMeta>(`/tasks/${taskId}/attachments`, form);
+  form.append("file", file, file.name);
+  return http
+    .post<AttachmentMeta>(`/tasks/${taskId}/attachments`, form, {
+      timeout: ATTACHMENT_UPLOAD_TIMEOUT_MS,
+    })
+    .then((response) => response.data);
 }

@@ -1,6 +1,5 @@
 import { decompress as zstdDecompress } from "fzstd";
 import { http } from "./api";
-import { parseBinaryXlsPreview } from "./xls-preview";
 import type { AttachmentMeta } from "./chat-api";
 
 /**
@@ -22,10 +21,8 @@ import type { AttachmentMeta } from "./chat-api";
 
 /** Единый лимит размера для формирования миниатюры изображения (Req 12.2, 12.6). */
 const THUMBNAIL_MAX_BYTES = 25 * 1024 * 1024;
-
-/** Лимиты табличного предпросмотра, чтобы модалка оставалась быстрой и читаемой. */
-const DEFAULT_SPREADSHEET_PREVIEW_ROWS = 80;
-const DEFAULT_SPREADSHEET_PREVIEW_COLUMNS = 16;
+const PDF_MIME_TYPE = "application/pdf";
+const DOCUMENT_PREVIEW_TIMEOUT_MS = 120_000;
 
 /** Категория обобщённого значка, соответствующая типу файла (Req 12.7). */
 export type GenericIconType =
@@ -71,29 +68,66 @@ const SPREADSHEET_EXTENSIONS = new Set<string>([
   ".xlsx",
   ".ods",
 ]);
-const PREVIEWABLE_SPREADSHEET_MIME_TYPES = new Set<string>([
-  "text/csv",
-  "application/csv",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-]);
-const PREVIEWABLE_SPREADSHEET_EXTENSIONS = new Set<string>([
-  ".csv",
-  ".xls",
-  ".xlsx",
+const PDF_EXTENSIONS = new Set<string>([".pdf"]);
+const AUDIO_MIME_BY_EXTENSION = new Map<string, string>([
+  [".3gp", "audio/3gpp"],
+  [".3gpp", "audio/3gpp"],
+  [".aac", "audio/aac"],
+  [".amr", "audio/amr"],
+  [".flac", "audio/flac"],
+  [".m4a", "audio/mp4"],
+  [".mp3", "audio/mpeg"],
+  [".mpga", "audio/mpeg"],
+  [".oga", "audio/ogg"],
+  [".ogg", "audio/ogg"],
+  [".opus", "audio/ogg"],
+  [".wav", "audio/wav"],
+  [".wave", "audio/wav"],
+  [".weba", "audio/webm"],
+  [".webm", "audio/webm"],
 ]);
 
 const PRESENTATION_MIME_TYPES = new Set<string>([
   "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
+  "application/vnd.ms-powerpoint.template.macroenabled.12",
   "application/vnd.oasis.opendocument.presentation",
+  "application/vnd.oasis.opendocument.presentation-template",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+  "application/vnd.openxmlformats-officedocument.presentationml.template",
+]);
+
+const PRESENTATION_EXTENSIONS = new Set<string>([
+  ".odp",
+  ".otp",
+  ".pot",
+  ".potm",
+  ".potx",
+  ".pps",
+  ".ppsm",
+  ".ppsx",
+  ".ppt",
+  ".pptm",
+  ".pptx",
 ]);
 
 const DOCUMENT_MIME_TYPES = new Set<string>([
   "application/msword",
+  "application/vnd.ms-word.document.macroenabled.12",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.oasis.opendocument.text",
   "application/rtf",
+  "text/rtf",
+]);
+
+const DOCUMENT_EXTENSIONS = new Set<string>([
+  ".doc",
+  ".docm",
+  ".docx",
+  ".odt",
+  ".rtf",
 ]);
 
 /** Приводит MIME-тип к нижнему регистру без параметров (`; charset=...`). */
@@ -107,6 +141,10 @@ function normalizedFileExtension(fileName: string): string {
   const trimmed = fileName.trim().toLowerCase();
   const dot = trimmed.lastIndexOf(".");
   return dot === -1 ? "" : trimmed.slice(dot);
+}
+
+function audioMimeTypeByExtension(fileName: string): string | null {
+  return AUDIO_MIME_BY_EXTENSION.get(normalizedFileExtension(fileName)) ?? null;
 }
 
 /** Форматирует размер файла в человекочитаемый вид (Б/КБ/МБ). */
@@ -134,6 +172,23 @@ export function isPreviewableVideo(mimeType: string): boolean {
   return normalizeMimeType(mimeType).startsWith("video/");
 }
 
+/** Определяет, можно ли показать Вложение как аудио через нативный браузерный плеер. */
+export function isPreviewableAudio(mimeType: string, fileName = ""): boolean {
+  return (
+    normalizeMimeType(mimeType).startsWith("audio/") ||
+    audioMimeTypeByExtension(fileName) !== null
+  );
+}
+
+/** Определяет, относится ли Вложение к PDF по MIME-типу или расширению. */
+export function isPdfFile(mimeType: string, fileName = ""): boolean {
+  const normalized = normalizeMimeType(mimeType);
+  return (
+    normalized === PDF_MIME_TYPE ||
+    PDF_EXTENSIONS.has(normalizedFileExtension(fileName))
+  );
+}
+
 /** Определяет, относится ли Вложение к таблицам Excel/CSV по MIME-типу или расширению. */
 export function isSpreadsheetFile(mimeType: string, fileName = ""): boolean {
   const normalized = normalizeMimeType(mimeType);
@@ -143,27 +198,48 @@ export function isSpreadsheetFile(mimeType: string, fileName = ""): boolean {
   );
 }
 
-/**
- * Поддержанный табличный предпросмотр.
- *
- * `.xlsx` читается безопасным браузерным парсером, CSV — локальным разбором,
- * старый бинарный `.xls` — ограниченным BIFF-парсером для предпросмотра.
- */
-export function isPreviewableSpreadsheet(
+/** Определяет, относится ли Вложение к Word/Writer-документам по MIME-типу или расширению. */
+export function isDocumentFile(mimeType: string, fileName = ""): boolean {
+  const normalized = normalizeMimeType(mimeType);
+  return (
+    DOCUMENT_MIME_TYPES.has(normalized) ||
+    DOCUMENT_EXTENSIONS.has(normalizedFileExtension(fileName))
+  );
+}
+
+/** Определяет, относится ли Вложение к презентациям PowerPoint/Impress. */
+export function isPresentationFile(mimeType: string, fileName = ""): boolean {
+  const normalized = normalizeMimeType(mimeType);
+  return (
+    PRESENTATION_MIME_TYPES.has(normalized) ||
+    PRESENTATION_EXTENSIONS.has(normalizedFileExtension(fileName))
+  );
+}
+
+/** Поддержанный PDF-предпросмотр Word/Writer-документов через серверный LibreOffice. */
+export function isPreviewableDocument(
   mimeType: string,
   fileName = "",
 ): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  return (
-    PREVIEWABLE_SPREADSHEET_MIME_TYPES.has(normalized) ||
-    PREVIEWABLE_SPREADSHEET_EXTENSIONS.has(normalizedFileExtension(fileName))
-  );
+  return isDocumentFile(mimeType, fileName);
+}
+
+/** Поддержанный PDF-предпросмотр презентаций через серверный LibreOffice Impress. */
+export function isPreviewablePresentation(
+  mimeType: string,
+  fileName = "",
+): boolean {
+  return isPresentationFile(mimeType, fileName);
 }
 
 export type AttachmentPreviewKind =
   | "image"
   | "video"
+  | "audio"
+  | "pdf"
   | "spreadsheet"
+  | "document"
+  | "presentation"
   | "download";
 
 /** Определяет режим полноэкранного предпросмотра Вложения. */
@@ -176,14 +252,29 @@ export function attachmentPreviewKind(
   if (isPreviewableVideo(attachment.mimeType)) {
     return "video";
   }
-  if (isPreviewableSpreadsheet(attachment.mimeType, attachment.originalName)) {
+  if (isPreviewableAudio(attachment.mimeType, attachment.originalName)) {
+    return "audio";
+  }
+  if (isPdfFile(attachment.mimeType, attachment.originalName)) {
+    return "pdf";
+  }
+  if (isSpreadsheetFile(attachment.mimeType, attachment.originalName)) {
     return "spreadsheet";
+  }
+  if (isPreviewableDocument(attachment.mimeType, attachment.originalName)) {
+    return "document";
+  }
+  if (isPreviewablePresentation(attachment.mimeType, attachment.originalName)) {
+    return "presentation";
   }
   return "download";
 }
 
 /** Сопоставляет MIME-типу обобщённый значок (Req 12.7). */
-export function genericIconType(mimeType: string): GenericIconType {
+export function genericIconType(
+  mimeType: string,
+  fileName = "",
+): GenericIconType {
   const normalized = normalizeMimeType(mimeType);
   if (normalized.startsWith("image/")) {
     return "image";
@@ -194,25 +285,51 @@ export function genericIconType(mimeType: string): GenericIconType {
   if (normalized.startsWith("audio/")) {
     return "audio";
   }
-  if (normalized === "application/pdf") {
+  if (isPdfFile(mimeType, fileName)) {
     return "pdf";
   }
   if (ARCHIVE_MIME_TYPES.has(normalized)) {
     return "archive";
   }
-  if (SPREADSHEET_MIME_TYPES.has(normalized)) {
+  if (isSpreadsheetFile(mimeType, fileName)) {
     return "spreadsheet";
   }
   if (normalized.startsWith("text/")) {
     return "text";
   }
-  if (PRESENTATION_MIME_TYPES.has(normalized)) {
+  if (isPresentationFile(mimeType, fileName)) {
     return "presentation";
   }
-  if (DOCUMENT_MIME_TYPES.has(normalized)) {
+  if (isDocumentFile(mimeType, fileName)) {
     return "document";
   }
   return "generic";
+}
+
+function resolveContentMimeType(
+  attachment: AttachmentMeta,
+  responseContentType: unknown,
+): string {
+  const headerMimeType =
+    typeof responseContentType === "string"
+      ? normalizeMimeType(responseContentType)
+      : "";
+  if (headerMimeType !== "" && headerMimeType !== "application/octet-stream") {
+    return headerMimeType;
+  }
+
+  const attachmentMimeType = normalizeMimeType(attachment.mimeType);
+  if (
+    attachmentMimeType !== "" &&
+    attachmentMimeType !== "application/octet-stream"
+  ) {
+    return attachmentMimeType;
+  }
+
+  return (
+    audioMimeTypeByExtension(attachment.originalName) ??
+    "application/octet-stream"
+  );
 }
 
 /**
@@ -232,33 +349,10 @@ export function selectRepresentation(
   ) {
     return { kind: "thumbnail" };
   }
-  return { kind: "icon", icon: genericIconType(attachment.mimeType) };
-}
-
-/** Обобщённый значок (emoji) по категории типа файла (Req 12.7). */
-export function iconGlyph(icon: GenericIconType): string {
-  switch (icon) {
-    case "image":
-      return "🖼️";
-    case "video":
-      return "🎞️";
-    case "audio":
-      return "🎵";
-    case "pdf":
-      return "📕";
-    case "archive":
-      return "🗜️";
-    case "text":
-      return "📄";
-    case "document":
-      return "📝";
-    case "spreadsheet":
-      return "📊";
-    case "presentation":
-      return "📽️";
-    default:
-      return "📎";
-  }
+  return {
+    kind: "icon",
+    icon: genericIconType(attachment.mimeType, attachment.originalName),
+  };
 }
 
 /**
@@ -279,212 +373,18 @@ export function fetchThumbnailBlob(attachmentId: string): Promise<Blob> {
 }
 
 /**
- * Загружает документный PDF-предпросмотр Вложения.
+ * Загружает PDF-предпросмотр офисного Вложения.
  *
- * Табличные файлы рендерятся на сервере через LibreOffice и возвращаются как
- * PDF, поэтому в модалке сохраняется реальный вид документа, а не пересобранная
- * HTML-таблица из значений ячеек.
+ * Таблицы, Word/Writer-документы и презентации рендерятся на сервере через
+ * LibreOffice и возвращаются как PDF, сохраняя исходное оформление.
  */
 export function fetchDocumentPreviewBlob(attachmentId: string): Promise<Blob> {
   return http
-    .get<Blob>(`/attachments/${attachmentId}/preview`, { responseType: "blob" })
+    .get<Blob>(`/attachments/${attachmentId}/preview`, {
+      responseType: "blob",
+      timeout: DOCUMENT_PREVIEW_TIMEOUT_MS,
+    })
     .then((response) => response.data);
-}
-
-export interface SpreadsheetPreview {
-  sheetName: string | null;
-  rows: string[][];
-  totalRows: number;
-  totalColumns: number;
-  visibleRows: number;
-  visibleColumns: number;
-}
-
-export interface SpreadsheetPreviewOptions {
-  maxRows?: number;
-  maxColumns?: number;
-}
-
-function isCsvAttachment(mimeType: string, fileName: string): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  return (
-    normalized === "text/csv" ||
-    normalized === "application/csv" ||
-    normalizedFileExtension(fileName) === ".csv"
-  );
-}
-
-function isBinaryXlsAttachment(mimeType: string, fileName: string): boolean {
-  const normalized = normalizeMimeType(mimeType);
-  return (
-    normalized === "application/vnd.ms-excel" ||
-    normalizedFileExtension(fileName) === ".xls"
-  );
-}
-
-function stringifyCell(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (value instanceof Date) {
-    return new Intl.DateTimeFormat("ru-RU").format(value);
-  }
-  return String(value);
-}
-
-function selectCsvDelimiter(sample: string): string {
-  const firstLine = sample.split(/\r?\n/, 1)[0] ?? "";
-  const delimiters = [",", ";", "\t"];
-  return delimiters.reduce((best, delimiter) => {
-    const currentCount = firstLine.split(delimiter).length;
-    const bestCount = firstLine.split(best).length;
-    return currentCount > bestCount ? delimiter : best;
-  }, ",");
-}
-
-function parseCsv(text: string): string[][] {
-  const delimiter = selectCsvDelimiter(text);
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-
-  const pushCell = (): void => {
-    row.push(cell);
-    cell = "";
-  };
-  const pushRow = (): void => {
-    pushCell();
-    rows.push(row);
-    row = [];
-  };
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index] ?? "";
-    const next = text[index + 1] ?? "";
-
-    if (quoted) {
-      if (char === '"' && next === '"') {
-        cell += '"';
-        index += 1;
-      } else if (char === '"') {
-        quoted = false;
-      } else {
-        cell += char;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      quoted = true;
-    } else if (char === delimiter) {
-      pushCell();
-    } else if (char === "\n") {
-      pushRow();
-    } else if (char !== "\r") {
-      cell += char;
-    }
-  }
-
-  if (cell !== "" || row.length > 0) {
-    pushRow();
-  }
-
-  return rows;
-}
-
-function blobToText(blob: Blob): Promise<string> {
-  const maybeText = (blob as Blob & { text?: () => Promise<string> }).text;
-  if (typeof maybeText === "function") {
-    return maybeText.call(blob);
-  }
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () =>
-      resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Не удалось прочитать текстовый файл."));
-    reader.readAsText(blob);
-  });
-}
-
-function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-  const maybeArrayBuffer = (
-    blob as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> }
-  ).arrayBuffer;
-  if (typeof maybeArrayBuffer === "function") {
-    return maybeArrayBuffer.call(blob);
-  }
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (reader.result instanceof ArrayBuffer) {
-        resolve(reader.result);
-      } else {
-        reject(new Error("Не удалось прочитать бинарный файл."));
-      }
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Не удалось прочитать бинарный файл."));
-    reader.readAsArrayBuffer(blob);
-  });
-}
-
-function buildSpreadsheetPreview(
-  rows: unknown[][],
-  sheetName: string | null,
-  options: SpreadsheetPreviewOptions = {},
-): SpreadsheetPreview {
-  const maxRows = options.maxRows ?? DEFAULT_SPREADSHEET_PREVIEW_ROWS;
-  const maxColumns = options.maxColumns ?? DEFAULT_SPREADSHEET_PREVIEW_COLUMNS;
-  const totalRows = rows.length;
-  const totalColumns = Math.max(0, ...rows.map((row) => row.length));
-  const visibleRows = Math.min(totalRows, maxRows);
-  const visibleColumns = Math.min(totalColumns, maxColumns);
-  const previewRows = rows
-    .slice(0, visibleRows)
-    .map((row) =>
-      Array.from({ length: visibleColumns }, (_, columnIndex) =>
-        stringifyCell(row[columnIndex]),
-      ),
-    );
-
-  return {
-    sheetName,
-    rows: previewRows,
-    totalRows,
-    totalColumns,
-    visibleRows,
-    visibleColumns,
-  };
-}
-
-/** Загружает компактное представление `.xlsx`/CSV для миниатюры или модалки. */
-export async function loadSpreadsheetPreview(
-  blob: Blob,
-  attachment: Pick<AttachmentMeta, "mimeType" | "originalName">,
-  options: SpreadsheetPreviewOptions = {},
-): Promise<SpreadsheetPreview> {
-  if (isCsvAttachment(attachment.mimeType, attachment.originalName)) {
-    const text = await blobToText(blob);
-    return buildSpreadsheetPreview(parseCsv(text), null, options);
-  }
-
-  if (isBinaryXlsAttachment(attachment.mimeType, attachment.originalName)) {
-    const buffer = await blobToArrayBuffer(blob);
-    return parseBinaryXlsPreview(new Uint8Array(buffer), options);
-  }
-
-  const { default: readXlsxFile } = await import("read-excel-file/browser");
-  const sheets = await readXlsxFile(blob);
-  const firstSheet = sheets[0];
-  return buildSpreadsheetPreview(
-    firstSheet?.data ?? [],
-    firstSheet?.sheet ?? null,
-    options,
-  );
 }
 
 /**
@@ -595,11 +495,10 @@ export async function openAttachment(
     typeof response.headers["x-checksum"] === "string"
       ? response.headers["x-checksum"]
       : attachment.checksum;
-  const mimeType =
-    typeof response.headers["content-type"] === "string" &&
-    response.headers["content-type"] !== "application/octet-stream"
-      ? response.headers["content-type"]
-      : attachment.mimeType;
+  const mimeType = resolveContentMimeType(
+    attachment,
+    response.headers["content-type"],
+  );
 
   const raw = await decompress(compressed, headerCompression);
 

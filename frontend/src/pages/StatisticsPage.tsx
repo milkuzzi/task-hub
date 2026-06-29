@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ApiError } from '@/lib/api';
-import { resolveErrorMessage } from '@/lib/error-message';
-import { MSK_OFFSET_MS } from '@/lib/time';
-import { TASK_STATUSES, TASK_STATUS_LABEL_KEYS, type TaskStatus } from '@/lib/tasks-api';
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ApiError } from "@/lib/api";
+import { resolveErrorMessage } from "@/lib/error-message";
+import { MSK_OFFSET_MS } from "@/lib/time";
+import {
+  TASK_STATUSES,
+  TASK_STATUS_LABEL_KEYS,
+  type TaskStatus,
+} from "@/lib/tasks-api";
 import {
   computeStatistics,
   downloadBlob,
@@ -13,9 +17,9 @@ import {
   type ExportFormat,
   type Statistics,
   type StatisticsPeriod,
-} from '@/lib/statistics-api';
-import { EmptyState } from '@/components/EmptyState';
-import { LoadingState } from '@/components/LoadingState';
+} from "@/lib/statistics-api";
+import { EmptyState } from "@/components/EmptyState";
+import { LoadingState } from "@/components/LoadingState";
 
 /**
  * Панель статистики для Администратора (задача 20.6, Req 17).
@@ -32,14 +36,14 @@ import { LoadingState } from '@/components/LoadingState';
 
 /** Преобразует значение `<input type="date">` (`ГГГГ-ММ-ДД`) в границу периода. */
 function dateInputToIso(value: string, endOfDay: boolean): string {
-  if (value === '') {
-    return '';
+  if (value === "") {
+    return "";
   }
   // Границы периода включительны и трактуются как настенное время Москвы
   // (MSK = UTC+3), а не UTC: «от» — начало московских суток, «до» — их конец.
   // Иначе выбор дня смещался бы на 3 часа относительно дня, который видит
   // пользователь (Req 17.6).
-  const [y, m, d] = value.split('-').map((part) => Number(part));
+  const [y, m, d] = value.split("-").map((part) => Number(part));
   const mskWallMs = endOfDay
     ? Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 23, 59, 59, 999)
     : Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
@@ -47,7 +51,10 @@ function dateInputToIso(value: string, endOfDay: boolean): string {
 }
 
 function statusTotal(stats: Statistics): number {
-  return TASK_STATUSES.reduce((sum, status) => sum + (stats.statusCounts[status] ?? 0), 0);
+  return TASK_STATUSES.reduce(
+    (sum, status) => sum + (stats.statusCounts[status] ?? 0),
+    0,
+  );
 }
 
 function percent(value: number, total: number): number {
@@ -57,8 +64,8 @@ function percent(value: number, total: number): number {
 export function StatisticsPage(): JSX.Element {
   const { t } = useTranslation();
 
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [stats, setStats] = useState<Statistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +87,7 @@ export function StatisticsPage(): JSX.Element {
   const load = useCallback(
     async (period: StatisticsPeriod): Promise<void> => {
       if (!isValidRange(period)) {
-        setError(t('statistics.errors.range'));
+        setError(t("statistics.errors.range"));
         return; // Сохраняем ранее отображённую статистику (Req 17.7).
       }
       setError(null);
@@ -91,9 +98,9 @@ export function StatisticsPage(): JSX.Element {
       } catch (err) {
         if (err instanceof ApiError && err.status === 422) {
           // Сервер также отклоняет некорректный диапазон (Req 17.7).
-          setError(t('statistics.errors.range'));
+          setError(t("statistics.errors.range"));
         } else {
-          setError(resolveErrorMessage(err, t, t('errors.generic')));
+          setError(resolveErrorMessage(err, t, t("errors.generic")));
         }
       } finally {
         setLoading(false);
@@ -104,25 +111,32 @@ export function StatisticsPage(): JSX.Element {
 
   // Первичная загрузка статистики за всё время.
   useEffect(() => {
-    void load({ from: '', to: '' });
+    void load({ from: "", to: "" });
   }, [load]);
 
   const handleApply = (event: React.FormEvent): void => {
     event.preventDefault();
+    setExportError(null);
     void load(buildPeriod());
   };
 
   const handleReset = (): void => {
-    setFromDate('');
-    setToDate('');
-    void load({ from: '', to: '' });
+    setFromDate("");
+    setToDate("");
+    setExportError(null);
+    void load({ from: "", to: "" });
   };
 
   /** Экспорт текущего периода в выбранном формате (Req 17.9, 17.10). */
   const handleExport = async (format: ExportFormat): Promise<void> => {
     const period = buildPeriod();
+    setError(null);
+    if (period.from === "" || period.to === "") {
+      setExportError(t("statistics.errors.exportPeriodRequired"));
+      return;
+    }
     if (!isValidRange(period)) {
-      setExportError(t('statistics.errors.range'));
+      setExportError(t("statistics.errors.range"));
       return;
     }
     setExportError(null);
@@ -132,7 +146,13 @@ export function StatisticsPage(): JSX.Element {
       downloadBlob(blob, exportFileName(format));
     } catch (err) {
       // Ошибка формирования файла не меняет отображённую статистику (Req 17.10).
-      setExportError(resolveErrorMessage(err, t, t('statistics.errors.export')));
+      if (err instanceof ApiError && err.status === 400) {
+        setExportError(t("statistics.errors.exportPeriodInvalid"));
+      } else {
+        setExportError(
+          resolveErrorMessage(err, t, t("statistics.errors.export")),
+        );
+      }
     } finally {
       setExporting(null);
     }
@@ -142,20 +162,24 @@ export function StatisticsPage(): JSX.Element {
     <section className="stack page-section">
       <div className="page-head">
         <div className="page-head__content">
-          <h1>{t('statistics.heading')}</h1>
+          <h1>{t("statistics.heading")}</h1>
         </div>
       </div>
 
       {/* Фильтр по периоду (Req 17.6). */}
-      <form className="panel panel--compact report-toolbar" onSubmit={handleApply} aria-label={t('statistics.period.label')}>
+      <form
+        className="panel panel--compact report-toolbar"
+        onSubmit={handleApply}
+        aria-label={t("statistics.period.label")}
+      >
         <div className="report-toolbar__controls">
           <label className="field report-toolbar__field">
             <input
               type="date"
               className="field__input"
-              aria-label={t('statistics.period.from')}
+              aria-label={t("statistics.period.from")}
               value={fromDate}
-              max={toDate === '' ? undefined : toDate}
+              max={toDate === "" ? undefined : toDate}
               onChange={(e) => setFromDate(e.target.value)}
             />
           </label>
@@ -163,35 +187,39 @@ export function StatisticsPage(): JSX.Element {
             <input
               type="date"
               className="field__input"
-              aria-label={t('statistics.period.to')}
+              aria-label={t("statistics.period.to")}
               value={toDate}
-              min={fromDate === '' ? undefined : fromDate}
+              min={fromDate === "" ? undefined : fromDate}
               onChange={(e) => setToDate(e.target.value)}
             />
           </label>
           <button className="btn btn--primary btn--sm" type="submit">
-            {t('statistics.period.apply')}
+            {t("statistics.period.apply")}
           </button>
           <button className="btn btn--sm" type="button" onClick={handleReset}>
-            {t('statistics.period.reset')}
+            {t("statistics.period.reset")}
           </button>
           <button
             className="btn btn--sm"
             type="button"
             disabled={exporting !== null}
-            aria-busy={exporting === 'csv'}
-            onClick={() => void handleExport('csv')}
+            aria-busy={exporting === "csv"}
+            onClick={() => void handleExport("csv")}
           >
-            {exporting === 'csv' ? t('common.loading') : t('statistics.export.csv')}
+            {exporting === "csv"
+              ? t("common.loading")
+              : t("statistics.export.csv")}
           </button>
           <button
             className="btn btn--sm"
             type="button"
             disabled={exporting !== null}
-            aria-busy={exporting === 'xlsx'}
-            onClick={() => void handleExport('xlsx')}
+            aria-busy={exporting === "xlsx"}
+            onClick={() => void handleExport("xlsx")}
           >
-            {exporting === 'xlsx' ? t('common.loading') : t('statistics.export.xlsx')}
+            {exporting === "xlsx"
+              ? t("common.loading")
+              : t("statistics.export.xlsx")}
           </button>
         </div>
         {(error !== null || exportError !== null) && (
@@ -202,47 +230,63 @@ export function StatisticsPage(): JSX.Element {
       </form>
 
       {loading ? (
-        <LoadingState label={t('common.loading')} />
+        <LoadingState label={t("common.loading")} />
       ) : stats === null ? (
-        <EmptyState message={t('common.empty')} />
+        <EmptyState message={t("common.empty")} />
       ) : (
         <>
           {/* Уведомление об отсутствии данных за период (Req 17.8). */}
           {!stats.hasData && (
             <p className="form-success" role="status">
-              {t('statistics.noData')}
+              {t("statistics.noData")}
             </p>
           )}
 
           {/* Сводные показатели. */}
           <div className="metric-strip">
             <div className="metric-panel">
-              <h2 className="metric-panel__title">{t('statistics.summary.total')}</h2>
+              <h2 className="metric-panel__title">
+                {t("statistics.summary.total")}
+              </h2>
               <p className="metric-panel__value">{stats.totalTasks}</p>
             </div>
             <div className="metric-panel">
-              <h2 className="metric-panel__title">{t('statistics.summary.overdue')}</h2>
+              <h2 className="metric-panel__title">
+                {t("statistics.summary.overdue")}
+              </h2>
               <p className="metric-panel__value">
-                {stats.overdueCount}{' '}
+                {stats.overdueCount}{" "}
                 <span className="text-muted">
                   ({stats.overduePercent.toFixed(1)}%)
                 </span>
               </p>
             </div>
             <div className="metric-panel">
-              <h2 className="metric-panel__title">{t('statistics.summary.avgCompletion')}</h2>
+              <h2 className="metric-panel__title">
+                {t("statistics.summary.avgCompletion")}
+              </h2>
               <p className="metric-panel__value">
-                {stats.avgCompletionHours.toFixed(1)}{' '}
-                <span className="text-muted">{t('statistics.summary.hours')}</span>
+                {stats.avgCompletionHours.toFixed(1)}{" "}
+                <span className="text-muted">
+                  {t("statistics.summary.hours")}
+                </span>
               </p>
             </div>
             <div className="metric-panel">
-              <h2 className="metric-panel__title">{t('statistics.summary.chatMessages')}</h2>
-              <p className="metric-panel__value">{stats.chatActivity.messageCount}</p>
+              <h2 className="metric-panel__title">
+                {t("statistics.summary.chatMessages")}
+              </h2>
+              <p className="metric-panel__value">
+                {stats.chatActivity.messageCount}
+              </p>
             </div>
             <div className="metric-panel">
-              <h2 className="metric-panel__title">{t('statistics.summary.activeChats')}</h2>
-              <p className="metric-panel__value">{stats.chatActivity.activeChats}</p>
+              <h2 className="metric-panel__title">
+                {t("statistics.summary.activeChats")}
+              </h2>
+              <p className="metric-panel__value">
+                {stats.chatActivity.activeChats}
+              </p>
             </div>
           </div>
 
@@ -253,19 +297,23 @@ export function StatisticsPage(): JSX.Element {
                 style={{
                   background: donutBackground(stats),
                 }}
-                aria-label={t('statistics.byStatus')}
+                aria-label={t("statistics.byStatus")}
               />
               <div className="status-donut__legend">
-                <h2>{t('statistics.byStatus')}</h2>
+                <h2>{t("statistics.byStatus")}</h2>
                 {TASK_STATUSES.map((status: TaskStatus) => {
                   const total = statusTotal(stats);
                   const count = stats.statusCounts[status] ?? 0;
                   return (
                     <p key={status}>
-                      <span className={`status-dot status-dot--${status.toLowerCase()}`} />
+                      <span
+                        className={`status-dot status-dot--${status.toLowerCase()}`}
+                      />
                       <span>{t(TASK_STATUS_LABEL_KEYS[status])}</span>
                       <strong>{count}</strong>
-                      <span className="text-muted">{percent(count, total)}%</span>
+                      <span className="text-muted">
+                        {percent(count, total)}%
+                      </span>
                     </p>
                   );
                 })}
@@ -273,16 +321,15 @@ export function StatisticsPage(): JSX.Element {
             </section>
 
             <section className="panel panel--compact participant-bars">
-              <h2>{t('statistics.byManager')}</h2>
+              <h2>{t("statistics.byManager")}</h2>
               <ParticipantBars rows={stats.byManager} />
             </section>
 
             <section className="panel panel--compact participant-bars">
-              <h2>{t('statistics.byExecutor')}</h2>
+              <h2>{t("statistics.byExecutor")}</h2>
               <ParticipantBars rows={stats.byExecutor} />
             </section>
           </div>
-
         </>
       )}
     </section>
@@ -293,21 +340,25 @@ function donutBackground(stats: Statistics): string {
   const total = Math.max(1, statusTotal(stats));
   let cursor = 0;
   const colors: Record<TaskStatus, string> = {
-    IN_PROGRESS: 'var(--status-in-progress)',
-    WAITING: 'var(--status-waiting)',
-    DONE: 'var(--status-done)',
-    NEEDS_ADMIN: 'var(--status-needs-admin)',
-    CANCELLED: 'var(--status-cancelled)',
+    IN_PROGRESS: "var(--status-in-progress)",
+    WAITING: "var(--status-waiting)",
+    DONE: "var(--status-done)",
+    NEEDS_ADMIN: "var(--status-needs-admin)",
+    CANCELLED: "var(--status-cancelled)",
   };
   const parts = TASK_STATUSES.map((status) => {
     const start = cursor;
     cursor += ((stats.statusCounts[status] ?? 0) / total) * 100;
     return `${colors[status]} ${start}% ${cursor}%`;
   });
-  return `conic-gradient(${parts.join(', ')})`;
+  return `conic-gradient(${parts.join(", ")})`;
 }
 
-function ParticipantBars({ rows }: { rows: Statistics['byManager'] }): JSX.Element {
+function ParticipantBars({
+  rows,
+}: {
+  rows: Statistics["byManager"];
+}): JSX.Element {
   const max = Math.max(1, ...rows.map((row) => row.taskCount));
   if (rows.length === 0) {
     return <p className="text-muted">Нет данных</p>;
@@ -316,9 +367,13 @@ function ParticipantBars({ rows }: { rows: Statistics['byManager'] }): JSX.Eleme
     <div className="participant-bars__list">
       {rows.map((row) => (
         <div className="participant-bar" key={row.userId}>
-          <span>{row.name !== '' ? row.name : row.userId}</span>
+          <span>{row.name !== "" ? row.name : row.userId}</span>
           <strong>{row.taskCount}</strong>
-          <i style={{ inlineSize: `${Math.max(6, (row.taskCount / max) * 100)}%` }} />
+          <i
+            style={{
+              inlineSize: `${Math.max(6, (row.taskCount / max) * 100)}%`,
+            }}
+          />
         </div>
       ))}
     </div>

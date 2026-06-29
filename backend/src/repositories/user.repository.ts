@@ -265,6 +265,12 @@ export class UserRepository extends BaseRepository {
     });
   }
 
+  /** Удаляет привязку MAX, принадлежащую пользователю. Операция идемпотентна. */
+  async deleteMaxLinkByUserId(userId: string, tx?: Prisma.TransactionClient): Promise<number> {
+    const result = await this.client(tx).maxLink.deleteMany({ where: { userId } });
+    return result.count;
+  }
+
   /**
    * Устанавливает признак полной отписки Пользователя от Уведомлений через Бот
    * MAX по идентификатору профиля MAX (Req 16.5).
@@ -284,6 +290,15 @@ export class UserRepository extends BaseRepository {
     tx?: Prisma.TransactionClient,
   ): Promise<MaxLink> {
     return this.client(tx).maxLink.update({ where: { maxUserId }, data: { mutedAll } });
+  }
+
+  /** Обновляет общую настройку MAX по идентификатору пользователя. */
+  setMaxMutedAllByUserId(
+    userId: string,
+    mutedAll: boolean,
+    tx?: Prisma.TransactionClient,
+  ): Promise<MaxLink> {
+    return this.client(tx).maxLink.update({ where: { userId }, data: { mutedAll } });
   }
 
   /**

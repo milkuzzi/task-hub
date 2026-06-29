@@ -1,4 +1,4 @@
-import { AssignmentKind, NotificationType, TaskStatus } from '@prisma/client';
+import { AssignmentKind, NotificationType, ReminderThreshold, TaskStatus } from '@prisma/client';
 import { ClockService } from '../clock';
 import { NotificationsService } from './notifications.service';
 import { DomainEvent } from './notifications.types';
@@ -79,6 +79,23 @@ describe('TaskNotificationRouter', () => {
     expect(event.type).toBe(NotificationType.TASK_STATUS_CHANGED);
     expect([...event.recipientIds].sort()).toEqual(['e1', 'm1']);
     expect(event.payload).toEqual({ status: TaskStatus.DONE });
+  });
+
+  it('добавляет название Задачи в напоминание о Дедлайне', async () => {
+    const { router, emit } = createRouter();
+
+    await router.notifyDeadlineReminder(
+      'task-1',
+      ReminderThreshold.NEAR,
+      ['e1'],
+      ['m1'],
+      'Сдать отчёт',
+    );
+
+    const event = lastEvent(emit);
+    expect(event.type).toBe(NotificationType.DEADLINE_REMINDER_NEAR);
+    expect([...event.recipientIds].sort()).toEqual(['e1', 'm1']);
+    expect(event.payload).toEqual({ threshold: 'NEAR', taskTitle: 'Сдать отчёт' });
   });
 
   it('уведомляет о переоткрытии/отмене/возврате (Req 13.11)', async () => {

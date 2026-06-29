@@ -110,6 +110,7 @@ function buildService(options: { actor: User | null; task: TaskWithAssignments |
 }
 
 const COMPLETE: StatusAction = { type: 'COMPLETE' };
+const START_WORK: StatusAction = { type: 'START_WORK' };
 const REOPEN: StatusAction = { type: 'REOPEN' };
 
 describe('TasksService.changeStatus — успешный переход (Req 10.4, 20.1)', () => {
@@ -137,6 +138,7 @@ describe('TasksService.changeStatus — успешный переход (Req 10.
       taskId: 'task-1',
       actorId: 'mgr',
       newStatus: TaskStatus.DONE,
+      taskTitle: 'Задача',
       executorIds: [],
       managerIds: ['mgr'],
     });
@@ -159,6 +161,37 @@ describe('TasksService.changeStatus — успешный переход (Req 10.
 
     expect(setStatus).toHaveBeenCalledWith('task-1', TaskStatus.WAITING);
     expect(result.status).toBe(TaskStatus.WAITING);
+  });
+
+  it('разрешает Менеджеру перевести Задачу из «Ожидает» в «В работе»', async () => {
+    const task = makeTask(TaskStatus.WAITING, [
+      { userId: 'mgr', kind: AssignmentKind.MANAGER },
+      { userId: 'e1', kind: AssignmentKind.EXECUTOR },
+    ]);
+    const { service, setStatus, record, enqueueStatusChanged } = buildService({
+      actor: makeActor('mgr', Role.MANAGER),
+      task,
+    });
+
+    const result = await service.changeStatus('mgr', 'task-1', START_WORK);
+
+    expect(setStatus).toHaveBeenCalledWith('task-1', TaskStatus.IN_PROGRESS);
+    expect(record.mock.calls[0]![0]).toMatchObject({
+      taskId: 'task-1',
+      authorId: 'mgr',
+      field: 'status',
+      oldValue: TaskStatus.WAITING,
+      newValue: TaskStatus.IN_PROGRESS,
+    });
+    expect(enqueueStatusChanged).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      actorId: 'mgr',
+      newStatus: TaskStatus.IN_PROGRESS,
+      taskTitle: 'Задача',
+      executorIds: ['e1'],
+      managerIds: ['mgr'],
+    });
+    expect(result.status).toBe(TaskStatus.IN_PROGRESS);
   });
 });
 

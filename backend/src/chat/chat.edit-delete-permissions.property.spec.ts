@@ -115,6 +115,7 @@ function buildHarness(people: Person[], authorId: string | null): Harness {
 
   const userRepository = {
     findActiveById: jest.fn(async (id: string) => users[id] ?? null),
+    findById: jest.fn(async (id: string) => users[id] ?? null),
   } as unknown as UserRepository;
 
   const taskRepository = {
@@ -202,10 +203,12 @@ function isAllowed(people: Person[], actorId: string, authorId: string | null): 
   }
   const isAuthor = authorId !== null && actorId === authorId;
   const isAdmin = actor.role === Role.ADMIN;
+  const author = authorId === null ? null : people.find((p) => p.id === authorId);
+  const isAdminAuthoredMessage = author?.role === Role.ADMIN;
   const isTaskManager = people.some(
     (p) => p.id === actorId && p.assignment === AssignmentKind.MANAGER,
   );
-  return isAuthor || isAdmin || isTaskManager;
+  return isAuthor || isAdmin || (isTaskManager && !isAdminAuthoredMessage);
 }
 
 describe('Property 30: Права на редактирование и удаление сообщения (Req 11.5, 11.6, 11.7)', () => {
@@ -234,7 +237,7 @@ describe('Property 30: Права на редактирование и удал�
       return people;
     });
 
-  it('правка/удаление разрешены ⇔ актор — автор, Менеджер задачи или Администратор; иначе отказ без изменения сообщения', async () => {
+  it('правка/удаление разрешены ⇔ актор — автор, Администратор или Менеджер задачи не для сообщения Администратора; иначе отказ без изменения сообщения', async () => {
     await fc.assert(
       fc.asyncProperty(
         peopleArb,

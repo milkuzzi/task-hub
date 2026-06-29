@@ -19,8 +19,7 @@ function guardsFor(target: object, method: string): unknown[] {
 
 function operationFor(target: object, method: string): SensitiveOp | undefined {
   return Reflect.getMetadata(RATE_LIMIT_OP_KEY, methodTarget(target, method)) as
-    | SensitiveOp
-    | undefined;
+    SensitiveOp | undefined;
 }
 
 describe('sensitive HTTP route rate limits', () => {

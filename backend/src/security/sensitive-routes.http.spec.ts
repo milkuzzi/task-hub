@@ -1,5 +1,7 @@
 import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
+import multipart from '@fastify/multipart';
 import { Reflector } from '@nestjs/core';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Role } from '@prisma/client';
 import request from 'supertest';
@@ -9,6 +11,7 @@ import { AuthController } from '../auth/auth.controller';
 import { AuthService } from '../auth/auth.service';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { ChatService } from '../chat';
+import { AppConfigService } from '../config';
 import { UserRepository } from '../repositories';
 import { RateLimiter } from './rate-limiter';
 import { RateLimitGuard } from './rate-limit.guard';
@@ -90,6 +93,16 @@ describe('sensitive HTTP routes', () => {
         { provide: RateLimiter, useValue: rateLimiter },
         { provide: AuthService, useValue: authService },
         {
+          provide: AppConfigService,
+          useValue: {
+            app: { publicUrl: 'https://tasks.example.test' },
+            max: {
+              oauthAuthorizeUrl: 'https://max.example.test/oauth/authorize',
+              oauthClientId: 'client-1',
+            },
+          },
+        },
+        {
           provide: UserRepository,
           useValue: { findByIdWithMaxLink: jest.fn().mockResolvedValue(currentUser) },
         },
@@ -101,8 +114,23 @@ describe('sensitive HTTP routes', () => {
       .useValue(sessionGuard)
       .compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter({ trustProxy: true }),
+    );
+    await (app as NestFastifyApplication).register(multipart, {
+      limits: {
+        fieldNameSize: 100,
+        fieldSize: 0,
+        fields: 0,
+        files: 1,
+        fileSize: 25 * 1024 * 1024,
+        parts: 1,
+        headerPairs: 20,
+      },
+      throwFileSizeLimit: true,
+    });
     await app.init();
+    await (app as NestFastifyApplication).getHttpAdapter().getInstance().ready();
   });
 
   afterEach(async () => {

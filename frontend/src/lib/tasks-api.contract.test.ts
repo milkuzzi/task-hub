@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from './api';
-import { createTask, getTask, listTasks } from './tasks-api';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api } from "./api";
+import { createTask, getTask, listTasks } from "./tasks-api";
 
-vi.mock('./api', () => ({
+vi.mock("./api", () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
@@ -17,19 +17,21 @@ afterEach(() => {
   mockedGet.mockReset();
 });
 
-describe('tasks-api — проверка runtime-контракта', () => {
-  it('принимает карточку задачи с признаком просрочки', async () => {
+describe("tasks-api — проверка runtime-контракта", () => {
+  it("принимает карточку задачи с признаком просрочки", async () => {
     mockedGet.mockResolvedValue({
       items: [
         {
-          id: 'task-1',
-          title: 'Просроченная задача',
+          id: "task-1",
+          title: "Просроченная задача",
           description: null,
-          deadline: '2030-01-01T00:00:00.000Z',
-          status: 'WAITING',
+          deadline: "2030-01-01T00:00:00.000Z",
+          status: "WAITING",
           messageCount: 0,
           hasUnread: false,
           isOverdue: true,
+          executorIds: ["executor-1"],
+          managerIds: ["manager-1"],
         },
       ],
       meta: {
@@ -43,19 +45,30 @@ describe('tasks-api — проверка runtime-контракта', () => {
     });
 
     await expect(listTasks()).resolves.toMatchObject({
-      items: [expect.objectContaining({ id: 'task-1', isOverdue: true })],
+      items: [
+        expect.objectContaining({
+          id: "task-1",
+          isOverdue: true,
+          executorIds: ["executor-1"],
+          managerIds: ["manager-1"],
+        }),
+      ],
     });
+    expect(mockedGet).toHaveBeenCalledWith(
+      "/tasks",
+      expect.objectContaining({ sortBy: "deadline", sortDirection: "asc" }),
+    );
   });
 
-  it('отклоняет неполную задачу до передачи данных в UI', async () => {
-    mockedGet.mockResolvedValue({ id: 'task-1', title: 'Неполная задача' });
+  it("отклоняет неполную задачу до передачи данных в UI", async () => {
+    mockedGet.mockResolvedValue({ id: "task-1", title: "Неполная задача" });
 
-    await expect(getTask('task-1')).rejects.toThrow('Некорректный ответ API');
+    await expect(getTask("task-1")).rejects.toThrow("Некорректный ответ API");
   });
 
-  it('отклоняет malformed страницу задач', async () => {
+  it("отклоняет malformed страницу задач", async () => {
     mockedGet.mockResolvedValue({
-      items: [{ id: 'task-1', title: 'Без обязательных полей' }],
+      items: [{ id: "task-1", title: "Без обязательных полей" }],
       meta: {
         page: 1,
         pageSize: 20,
@@ -66,19 +79,19 @@ describe('tasks-api — проверка runtime-контракта', () => {
       },
     });
 
-    await expect(listTasks()).rejects.toThrow('Некорректный ответ API');
+    await expect(listTasks()).rejects.toThrow("Некорректный ответ API");
   });
 
-  it('отклоняет malformed ответ мутации задачи', async () => {
-    vi.mocked(api.post).mockResolvedValue({ id: 'task-1' });
+  it("отклоняет malformed ответ мутации задачи", async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: "task-1" });
 
     await expect(
       createTask({
-        title: 'Задача',
-        deadline: '2030-01-01T00:00:00.000Z',
-        executorIds: ['u1'],
-        managerIds: ['u2'],
+        title: "Задача",
+        deadline: "2030-01-01T00:00:00.000Z",
+        executorIds: ["u1"],
+        managerIds: ["u2"],
       }),
-    ).rejects.toThrow('Некорректный ответ API');
+    ).rejects.toThrow("Некорректный ответ API");
   });
 });

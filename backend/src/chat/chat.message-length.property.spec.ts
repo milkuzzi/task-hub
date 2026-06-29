@@ -120,6 +120,17 @@ describe('Property 29: Валидация длины текста сообщен
             } as unknown as User)
           : null,
       ),
+      findById: jest.fn(async (id: string) =>
+        id === SENDER_ID
+          ? ({
+              id,
+              displayName: `Имя ${id}`,
+              role: Role.EXECUTOR,
+              isActive: true,
+              deletedAt: null,
+            } as unknown as User)
+          : null,
+      ),
     } as unknown as UserRepository;
 
     const taskRepository = {

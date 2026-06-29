@@ -13,6 +13,7 @@ import {
 } from '../repositories';
 import { StorageService, StoredObject } from '../storage';
 import { AttachmentsService } from './attachments.service';
+import { DocumentPreviewService } from './document-preview.service';
 import { ThumbnailGenerator } from './thumbnail-generator';
 import { UploadFile } from './attachments.types';
 
@@ -66,16 +67,38 @@ function makeTask(
 interface Harness {
   service: AttachmentsService;
   createdAttachments: Array<Record<string, unknown>>;
-  storage: { store: jest.Mock; delete: jest.Mock };
+  storage: { store: jest.Mock; delete: jest.Mock; readDecompressed: jest.Mock };
   attachmentRepository: { create: jest.Mock; findById: jest.Mock; setThumbnailPath: jest.Mock };
+  documentPreviewService: { supports: jest.Mock; convertToPdf: jest.Mock };
   storedResult: { value: StoredObject };
+}
+
+function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
+  return {
+    id: 'attachment-1',
+    messageId: 'message-1',
+    taskId: 'task-1',
+    uploaderId: 'executor-1',
+    originalName: 'report.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    sizeBytes: BigInt(100),
+    storagePath: 'task-1/report.zst',
+    thumbnailPath: null,
+    compression: 'zstd',
+    checksum: 'checksum-report',
+    createdAt: new Date('2026-06-19T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-19T10:00:00.000Z'),
+    ...overrides,
+  } as unknown as Attachment;
 }
 
 function buildHarness(
   options: {
     users?: Record<string, User>;
     task?: TaskWithAssignments;
+    attachment?: Attachment;
     storeImpl?: () => Promise<StoredObject>;
+    documentPreviewService?: { supports: jest.Mock; convertToPdf: jest.Mock };
   } = {},
 ): Harness {
   const users = options.users ?? {
@@ -111,7 +134,7 @@ function buildHarness(
   } as unknown as TaskRepository;
 
   // Последнее созданное Вложение для перечитывания при формировании миниатюры.
-  let lastCreated: Attachment | null = null;
+  let lastCreated: Attachment | null = options.attachment ?? null;
   const attachmentRepository = {
     create: jest.fn(async (data: Record<string, unknown>) => {
       createdAttachments.push(data);
@@ -134,6 +157,11 @@ function buildHarness(
     generate: jest.fn(async (input: { content: Buffer }) => input.content),
   } as unknown as ThumbnailGenerator;
 
+  const documentPreviewService = options.documentPreviewService ?? {
+    supports: jest.fn(() => false),
+    convertToPdf: jest.fn(),
+  };
+
   const service = new AttachmentsService(
     attachmentRepository as unknown as AttachmentRepository,
     taskRepository,
@@ -141,6 +169,7 @@ function buildHarness(
     storage as unknown as StorageService,
     config,
     thumbnailGenerator,
+    documentPreviewService as unknown as DocumentPreviewService,
   );
 
   return {
@@ -148,6 +177,7 @@ function buildHarness(
     createdAttachments,
     storage,
     attachmentRepository,
+    documentPreviewService,
     storedResult,
   };
 }
@@ -191,6 +221,51 @@ describe('AttachmentsService.uploadToTask', () => {
     // Вложение создаётся непривязанным (messageId не задаётся).
     expect(h.createdAttachments[0]).not.toHaveProperty('message');
     expect(attachment.id).toBe('attachment-new');
+  });
+
+  it('сохраняет аудиофайл с пустым MIME-типом, выводя тип по расширению', async () => {
+    const h = buildHarness();
+
+    await h.service.uploadToTask(
+      'executor-1',
+      'task-1',
+      makeFile({ originalName: 'voice.mp3', mimeType: '' }),
+    );
+
+    expect(h.createdAttachments[0]).toMatchObject({
+      originalName: 'voice.mp3',
+      mimeType: 'audio/mpeg',
+    });
+  });
+
+  it('уточняет application/octet-stream для аудио по расширению файла', async () => {
+    const h = buildHarness();
+
+    await h.service.uploadToTask(
+      'executor-1',
+      'task-1',
+      makeFile({ originalName: 'recording.m4a', mimeType: 'application/octet-stream' }),
+    );
+
+    expect(h.createdAttachments[0]).toMatchObject({
+      originalName: 'recording.m4a',
+      mimeType: 'audio/mp4',
+    });
+  });
+
+  it('сохраняет неизвестный файл без MIME как application/octet-stream', async () => {
+    const h = buildHarness();
+
+    await h.service.uploadToTask(
+      'executor-1',
+      'task-1',
+      makeFile({ originalName: 'payload.bin', mimeType: '' }),
+    );
+
+    expect(h.createdAttachments[0]).toMatchObject({
+      originalName: 'payload.bin',
+      mimeType: 'application/octet-stream',
+    });
   });
 
   it('администратор может загрузить вложение (Req 12.1)', async () => {
@@ -276,5 +351,88 @@ describe('AttachmentsService.uploadToTask', () => {
     ).rejects.toBeInstanceOf(ValidationException);
 
     expect(h.storage.store).not.toHaveBeenCalled();
+  });
+});
+
+describe('AttachmentsService.openDocumentPreview', () => {
+  it('рендерит Word-документ в PDF через LibreOffice-сервис', async () => {
+    const documentPreviewService = {
+      supports: jest.fn(() => true),
+      convertToPdf: jest.fn(async () => ({
+        content: Buffer.from('pdf-bytes'),
+        mimeType: 'application/pdf' as const,
+      })),
+    };
+    const h = buildHarness({
+      attachment: makeAttachment({
+        originalName: 'brief.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
+      documentPreviewService,
+    });
+
+    const result = await h.service.openDocumentPreview('executor-1', 'attachment-1');
+
+    expect(h.documentPreviewService.supports).toHaveBeenCalledWith(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'brief.docx',
+    );
+    expect(h.storage.readDecompressed).toHaveBeenCalledWith('task-1/report.zst');
+    expect(h.documentPreviewService.convertToPdf).toHaveBeenCalledWith({
+      content: Buffer.from('image-bytes'),
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      originalName: 'brief.docx',
+    });
+    expect(result).toEqual({
+      content: Buffer.from('pdf-bytes'),
+      mimeType: 'application/pdf',
+      fileName: 'brief.pdf',
+    });
+  });
+
+  it('рендерит PowerPoint-презентацию в PDF через LibreOffice-сервис', async () => {
+    const documentPreviewService = {
+      supports: jest.fn(() => true),
+      convertToPdf: jest.fn(async () => ({
+        content: Buffer.from('presentation-pdf'),
+        mimeType: 'application/pdf' as const,
+      })),
+    };
+    const h = buildHarness({
+      attachment: makeAttachment({
+        originalName: 'quarterly-review.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      }),
+      documentPreviewService,
+    });
+
+    const result = await h.service.openDocumentPreview('executor-1', 'attachment-1');
+
+    expect(h.documentPreviewService.convertToPdf).toHaveBeenCalledWith({
+      content: Buffer.from('image-bytes'),
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      originalName: 'quarterly-review.pptx',
+    });
+    expect(result).toEqual({
+      content: Buffer.from('presentation-pdf'),
+      mimeType: 'application/pdf',
+      fileName: 'quarterly-review.pdf',
+    });
+  });
+
+  it('не читает файл, если тип не поддерживает PDF-предпросмотр', async () => {
+    const h = buildHarness({
+      attachment: makeAttachment({
+        originalName: 'archive.zip',
+        mimeType: 'application/zip',
+      }),
+    });
+
+    await expect(
+      h.service.openDocumentPreview('executor-1', 'attachment-1'),
+    ).rejects.toBeInstanceOf(EntityNotFoundException);
+
+    expect(h.storage.readDecompressed).not.toHaveBeenCalled();
+    expect(h.documentPreviewService.convertToPdf).not.toHaveBeenCalled();
   });
 });

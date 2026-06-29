@@ -2,7 +2,7 @@
 //
 // Единый источник истины модели данных (см. design.md → Data Models).
 // Сущности: User, UserEmail, Task, TaskAssignment, Chat, Message, Attachment,
-// MessageRead, AuditEntry, Notification, Session, MaxLink, ChatMute,
+// MessageRead, AuditEntry, Notification, Session, MaxLink, MaxAuthState, ChatMute,
 // DeadlineReminder, BackupRecord.
 //
 // Время хранится в UTC (timestamptz); преобразование в MSK выполняется в слое
@@ -32,8 +32,8 @@ enum Role {
 enum TaskStatus {
   IN_PROGRESS // «В работе»
   WAITING // «Ожидает»
-  DONE // «Выполнено»
   NEEDS_ADMIN // «Требует администратора»
+  DONE // «Выполнено»
   CANCELLED // «Отменено»
 }
 
@@ -153,6 +153,25 @@ model MaxLink {
   mutedAll  Boolean @default(false) // полная отписка от MAX (Req 16.5)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Одноразовое состояние привязки/входа через Бота MAX.
+model MaxAuthState {
+  id              String    @id @default(uuid()) @db.Uuid
+  state           String    @unique
+  purpose         String
+  userId          String?   @db.Uuid
+  maxUserId       String?
+  completedUserId String?   @db.Uuid
+  error           String?
+  expiresAt       DateTime  @db.Timestamptz
+  consumedAt      DateTime? @db.Timestamptz
+  completedAt     DateTime? @db.Timestamptz
+  createdAt       DateTime  @default(now()) @db.Timestamptz
+
+  @@index([purpose])
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // =========================================================================

@@ -12,8 +12,9 @@ import { Actor, Status, StatusAction } from './status.types';
  * по таблице переходов:
  * - сообщение Исполнителя в «В работе»/«Ожидает» → «Ожидает» (Req 10.1);
  * - сообщение Менеджера/Администратора в «В работе»/«Ожидает» → «В работе» (Req 10.2);
- * - явные переходы COMPLETE/REOPEN/CANCEL/RETURN/REQUEST_ADMIN/ADMIN_SET/CLEAR_ADMIN
- *   из допустимых статусов с надлежащими правами актора (Req 10.4–10.10).
+ * - явные переходы COMPLETE/START_WORK/REOPEN/CANCEL/RETURN/REQUEST_ADMIN/
+ *   ADMIN_SET/CLEAR_ADMIN из допустимых статусов с надлежащими правами актора
+ *   (Req 10.4–10.10).
  *
  * Тест чистый: автомат не имеет внешних зависимостей (без БД).
  */
@@ -76,6 +77,13 @@ describe('StatusMachine — Property 26: корректность валидны
       transitionScenario({ type: 'COMPLETE' }, current, actor, reviewedFlag, 'DONE'),
     );
 
+  // START_WORK: «Ожидает» → «В работе».
+  const startWorkScenario: fc.Arbitrary<Scenario> = fc
+    .record({ actor: fc.constantFrom(...managerial), reviewedFlag: fc.boolean() })
+    .map(({ actor, reviewedFlag }) =>
+      transitionScenario({ type: 'START_WORK' }, 'WAITING', actor, reviewedFlag, 'IN_PROGRESS'),
+    );
+
   // REOPEN (Req 10.5): «Выполнено» → «В работе».
   const reopenScenario: fc.Arbitrary<Scenario> = fc
     .record({ actor: fc.constantFrom(...managerial), reviewedFlag: fc.boolean() })
@@ -104,11 +112,16 @@ describe('StatusMachine — Property 26: корректность валидны
   const requestAdminScenario: fc.Arbitrary<Scenario> = fc
     .record({
       current: fc.constantFrom<Status>('IN_PROGRESS', 'WAITING'),
-      actor: fc.constantFrom(...managerial),
       reviewedFlag: fc.boolean(),
     })
-    .map(({ current, actor, reviewedFlag }) =>
-      transitionScenario({ type: 'REQUEST_ADMIN' }, current, actor, reviewedFlag, 'NEEDS_ADMIN'),
+    .map(({ current, reviewedFlag }) =>
+      transitionScenario(
+        { type: 'REQUEST_ADMIN' },
+        current,
+        'MANAGER',
+        reviewedFlag,
+        'NEEDS_ADMIN',
+      ),
     );
 
   // ADMIN_SET (Req 10.9): из «Требует администратора» Администратор выбирает целевой статус.
@@ -138,6 +151,7 @@ describe('StatusMachine — Property 26: корректность валидны
   const anyValidScenario: fc.Arbitrary<Scenario> = fc.oneof(
     chatScenario,
     completeScenario,
+    startWorkScenario,
     reopenScenario,
     cancelScenario,
     returnScenario,

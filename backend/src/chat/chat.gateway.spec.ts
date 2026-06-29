@@ -3,7 +3,7 @@ import { WsException } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { AuthPrincipal, SessionTokenService, SocketSessionDisconnector } from '../auth';
 import { SiteNotificationDispatcher } from '../notifications';
-import { TasksService } from '../tasks';
+import { TaskRealtimeDispatcher, TasksService } from '../tasks';
 import { ChatEvents } from './chat.events';
 import { ChatGateway } from './chat.gateway';
 import { personaRoom, taskRoom } from './chat.rooms';
@@ -24,6 +24,7 @@ describe('ChatGateway', () => {
   let tasks: { getVisibleTask: jest.Mock };
   let disconnector: { bindServer: jest.Mock };
   let siteNotifications: { bind: jest.Mock };
+  let taskRealtime: { bind: jest.Mock };
   let gateway: ChatGateway;
 
   /** Создаёт заглушку клиентского сокета. */
@@ -69,11 +70,13 @@ describe('ChatGateway', () => {
     tasks = { getVisibleTask: jest.fn() };
     disconnector = { bindServer: jest.fn() };
     siteNotifications = { bind: jest.fn() };
+    taskRealtime = { bind: jest.fn() };
     gateway = new ChatGateway(
       sessionTokens as unknown as SessionTokenService,
       tasks as unknown as TasksService,
       disconnector as unknown as SocketSessionDisconnector,
       siteNotifications as unknown as SiteNotificationDispatcher,
+      taskRealtime as unknown as TaskRealtimeDispatcher,
     );
   });
 
@@ -88,6 +91,12 @@ describe('ChatGateway', () => {
       const server = {} as Server;
       gateway.afterInit(server);
       expect(siteNotifications.bind).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    it('привязывает realtime-доставку изменений задач к диспетчеру', () => {
+      const server = {} as Server;
+      gateway.afterInit(server);
+      expect(taskRealtime.bind).toHaveBeenCalledWith(expect.any(Function));
     });
   });
 
@@ -107,6 +116,41 @@ describe('ChatGateway', () => {
     it('принимает токен из заголовка Authorization: Bearer', async () => {
       sessionTokens.verify.mockResolvedValue(principal);
       const { socket } = makeSocket({ headers: { authorization: 'Bearer header-token' } });
+
+      await gateway.handleConnection(socket);
+
+      expect(sessionTokens.verify).toHaveBeenCalledWith('header-token');
+    });
+
+    it('принимает токен из cookie taskhub_session', async () => {
+      sessionTokens.verify.mockResolvedValue(principal);
+      const { socket } = makeSocket({ headers: { cookie: 'taskhub_session=cookie-token' } });
+
+      await gateway.handleConnection(socket);
+
+      expect(sessionTokens.verify).toHaveBeenCalledWith('cookie-token');
+    });
+
+    it('предпочитает auth.token cookie-сессии', async () => {
+      sessionTokens.verify.mockResolvedValue(principal);
+      const { socket } = makeSocket({
+        auth: { token: 'max-token' },
+        headers: { cookie: 'taskhub_session=stale-cookie-token' },
+      });
+
+      await gateway.handleConnection(socket);
+
+      expect(sessionTokens.verify).toHaveBeenCalledWith('max-token');
+    });
+
+    it('предпочитает Authorization Bearer cookie-сессии', async () => {
+      sessionTokens.verify.mockResolvedValue(principal);
+      const { socket } = makeSocket({
+        headers: {
+          authorization: 'Bearer header-token',
+          cookie: 'taskhub_session=stale-cookie-token',
+        },
+      });
 
       await gateway.handleConnection(socket);
 
@@ -207,6 +251,16 @@ describe('ChatGateway', () => {
 
       expect(to).toHaveBeenCalledWith(taskRoom('task-1'));
       expect(emit).toHaveBeenCalledWith(ChatEvents.StatusUpdate, { status: 'IN_PROGRESS' });
+    });
+
+    it('рассылает изменение задачи в комнату задачи и персональные комнаты получателей', () => {
+      const { to, emit } = attachServer();
+      const payload = { taskId: 'task-1', reason: 'updated' as const };
+
+      gateway.broadcastTaskUpdated('task-1', payload, ['u1', 'u2', 'u1']);
+
+      expect(to).toHaveBeenCalledWith([taskRoom('task-1'), personaRoom('u1'), personaRoom('u2')]);
+      expect(emit).toHaveBeenCalledWith(ChatEvents.TaskUpdated, payload);
     });
 
     it('рассылает счётчик сообщений в комнату задачи', () => {

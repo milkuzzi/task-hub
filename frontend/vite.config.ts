@@ -1,6 +1,6 @@
-import { fileURLToPath, URL } from 'node:url';
-import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
+import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 /**
  * Конфигурация сборки клиента «Система поручений».
@@ -10,26 +10,28 @@ import react from '@vitejs/plugin-react';
  *   чтобы локальная разработка шла с одного источника (Req 1.3 — единый HTTPS-
  *   контур обеспечивается Nginx в продакшене, в dev — прокси Vite).
  */
-const BACKEND_TARGET = process.env.VITE_BACKEND_URL ?? 'http://localhost:3000';
+const BACKEND_TARGET = process.env.VITE_BACKEND_URL ?? "http://localhost:3000";
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      "/api": {
         target: BACKEND_TARGET,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        headers: { "x-forwarded-proto": "https" },
+        rewrite: (path) => path.replace(/^\/api/, ""),
       },
-      '/socket.io': {
+      "/socket.io": {
         target: BACKEND_TARGET,
         changeOrigin: true,
+        headers: { "x-forwarded-proto": "https" },
         ws: true,
       },
     },
@@ -37,10 +39,10 @@ export default defineConfig({
   test: {
     // Юнит- и компонентные тесты клиента (задача 20.7): браузерное окружение
     // для React Testing Library и глобальные API (crypto, DecompressionStream).
-    environment: 'jsdom',
+    environment: "jsdom",
     globals: true,
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     css: false,
   },
 });

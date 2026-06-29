@@ -104,11 +104,10 @@ const eventArb: fc.Arbitrary<DomainEvent> = fc
       { nil: undefined },
     ),
   })
-  .map(
-    ({ channels, ...rest }): DomainEvent =>
-      // Поле channels опускается, когда канал не задан (по умолчанию сайт + MAX),
-      // чтобы соответствовать exactOptionalPropertyTypes.
-      channels === undefined ? rest : { ...rest, channels },
+  .map(({ channels, ...rest }): DomainEvent =>
+    // Поле channels опускается, когда канал не задан (по умолчанию сайт + MAX),
+    // чтобы соответствовать exactOptionalPropertyTypes.
+    channels === undefined ? rest : { ...rest, channels },
   );
 
 describe('NotificationsService.emit — Property 36: одно событие — отдельные уведомления получателям', () => {

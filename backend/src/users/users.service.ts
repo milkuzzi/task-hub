@@ -641,6 +641,29 @@ export class UsersService {
   }
 
   /**
+   * Отвязывает профиль MAX от собственной учётной записи.
+   *
+   * Операция доступна только для активной учётной записи и идемпотентна: если
+   * привязки уже нет, данные остаются без изменений и ошибка не возвращается.
+   * После удаления записи `MaxLink` последующие входы через MAX для этого
+   * профиля перестают находить пользователя.
+   *
+   * @param userId Идентификатор Пользователя, отвязывающего собственный MAX.
+   * @throws EntityNotFoundException Если учётная запись не найдена или удалена.
+   */
+  async unlinkMax(userId: string): Promise<void> {
+    const user = await this.userRepository.findActiveById(userId);
+    if (user === null) {
+      throw new EntityNotFoundException('Учётная запись не найдена или удалена.');
+    }
+
+    const deleted = await this.userRepository.deleteMaxLinkByUserId(userId);
+    if (deleted > 0) {
+      this.logger.log(`Пользователь «${userId}» отвязал профиль MAX.`);
+    }
+  }
+
+  /**
    * Проверяет и нормализует отображаемое имя пользователя (Req 6.3).
    *
    * Имя должно быть непустым после удаления краевых пробелов и не превышать

@@ -27,7 +27,11 @@ describe('configuration()', () => {
     expect(cfg.redis.host).toBe('localhost');
     expect(cfg.redis.port).toBe(6379);
     expect(cfg.sendpulse.senderName).toBe('Система поручений');
-    expect(cfg.max.botApiBaseUrl).toBe('https://botapi.max.ru');
+    expect(cfg.max.oauthAuthorizeUrl).toBe('');
+    expect(cfg.max.botUsername).toBe('');
+    expect(cfg.max.botApiBaseUrl).toBe('https://platform-api2.max.ru');
+    expect(cfg.max.botWebhookSecret).toBe('');
+    expect(cfg.max.miniAppInitDataTtlSeconds).toBe(300);
     expect(cfg.s3.bucket).toBe('task-hub-backups');
     expect(cfg.reminders.farSeconds).toBe(86400);
     expect(cfg.reminders.nearSeconds).toBe(7200);
@@ -44,6 +48,15 @@ describe('configuration()', () => {
     const cfg = configuration();
 
     expect(cfg.auth.accessTokenTtlSeconds).toBe(3600);
+  });
+
+  it('использует токен Бота MAX как webhook secret, если отдельный secret не задан', () => {
+    process.env.MAX_BOT_TOKEN = 'bot-token';
+    delete process.env.MAX_BOT_WEBHOOK_SECRET;
+
+    const cfg = configuration();
+
+    expect(cfg.max.botWebhookSecret).toBe('bot-token');
   });
 
   it('не задаёт пароль Redis, если REDIS_PASSWORD не указан', () => {

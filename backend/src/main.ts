@@ -1,6 +1,10 @@
 import { NestFactory } from '@nestjs/core';
+import multipart from '@fastify/multipart';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config';
+import { buildHttpsRedirectUrl, isSecureRequest } from './http-redirect';
 
 /**
  * Точка входа HTTP-приложения «Система поручений».
@@ -18,8 +22,38 @@ import { AppConfigService } from './config';
  *   `CommonModule` (APP_PIPE/APP_FILTER) и здесь не дублируются (Req 1.2).
  */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const adapter = new FastifyAdapter({ trustProxy: true });
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
   const config = app.get(AppConfigService);
+
+  await app.register(multipart, {
+    limits: {
+      fieldNameSize: 100,
+      fieldSize: 0,
+      fields: 0,
+      files: 1,
+      fileSize: 25 * 1024 * 1024,
+      parts: 1,
+      headerPairs: 20,
+    },
+    throwFileSizeLimit: true,
+  });
+
+  adapter.setOnRequestHook((request: FastifyRequest, reply: FastifyReply, done) => {
+    const forwardedProto = firstHeaderValue(request.headers['x-forwarded-proto']);
+    if (isSecureRequest({ protocol: request.protocol, forwardedProto })) {
+      done();
+      return;
+    }
+
+    const host = firstHeaderValue(request.headers.host);
+    if (host === undefined || host.trim() === '') {
+      done();
+      return;
+    }
+
+    reply.redirect(buildHttpsRedirectUrl({ host, originalUrl: request.url }), 301);
+  });
 
   // CORS с передачей сессионных учётных данных (Req 1.4).
   app.enableCors({
@@ -27,7 +61,11 @@ async function bootstrap(): Promise<void> {
     credentials: true,
   });
 
-  await app.listen(config.app.port);
+  await app.listen(config.app.port, '0.0.0.0');
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 void bootstrap();

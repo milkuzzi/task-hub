@@ -10,6 +10,7 @@ import { TaskStatus } from '@prisma/client';
  */
 export const STATUS_ACTION_TYPES = [
   'COMPLETE', // Пометить «Выполнено» (Req 10.4)
+  'START_WORK', // Вернуть из «Ожидает» в «В работе»
   'REOPEN', // Переоткрыть из «Выполнено» (Req 10.5)
   'CANCEL', // Отменить (Req 10.6)
   'RETURN', // Вернуть из «Отменено» (Req 10.7)

@@ -6,7 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import { sendJson, setResponseStatus, type HttpResponseLike } from '../http';
 import { AppException } from './app-exception';
 import { ERROR_CODE_REGISTRY, ErrorCode, errorCodeForStatus } from './error-codes';
 import { buildErrorResponse, type ErrorResponseBody } from './error-response';
@@ -28,19 +28,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const httpContext = host.switchToHttp();
-    const response = httpContext.getResponse<Response>();
-    const request = httpContext.getRequest<Request>();
+    const response = httpContext.getResponse<HttpResponseLike>();
+    const request = httpContext.getRequest<{ method?: string; url?: string }>();
 
     const { status, body } = this.resolve(exception);
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
-        `Необработанная ошибка при обработке запроса ${request.method} ${request.url}`,
+        `Необработанная ошибка при обработке запроса ${request.method ?? 'UNKNOWN'} ${
+          request.url ?? ''
+        }`,
         exception instanceof Error ? exception.stack : String(exception),
       );
     }
 
-    response.status(status).json(body);
+    setResponseStatus(response, status);
+    sendJson(response, body);
   }
 
   /** Определяет HTTP-статус и тело ответа в едином формате для исключения. */

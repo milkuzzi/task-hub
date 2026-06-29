@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { Role } from '@prisma/client';
 import { AccessDeniedException, ValidationException } from '../common/errors';
 import { AuthService, SessionAuthGuard, AuthenticatedRequest } from '../auth';
@@ -36,7 +37,10 @@ describe('UsersController', () => {
   ): {
     controller: UsersController;
     usersService: jest.Mocked<
-      Pick<UsersService, 'transferAdmin' | 'restoreUser' | 'updateProfile' | 'deleteUser'>
+      Pick<
+        UsersService,
+        'transferAdmin' | 'restoreUser' | 'updateProfile' | 'setAvatar' | 'deleteUser'
+      >
     >;
     userRepository: {
       listActiveWithMaxLink: jest.Mock;
@@ -49,9 +53,13 @@ describe('UsersController', () => {
       transferAdmin: jest.fn().mockResolvedValue(undefined),
       restoreUser: jest.fn().mockResolvedValue({ ...adminUserRow, id: 'u1' }),
       updateProfile: jest.fn().mockResolvedValue({ ...adminUserRow, id: 'u1' }),
+      setAvatar: jest.fn().mockResolvedValue(undefined),
       deleteUser: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<
-      Pick<UsersService, 'transferAdmin' | 'restoreUser' | 'updateProfile' | 'deleteUser'>
+      Pick<
+        UsersService,
+        'transferAdmin' | 'restoreUser' | 'updateProfile' | 'setAvatar' | 'deleteUser'
+      >
     >;
 
     const userRepository = {
@@ -84,6 +92,41 @@ describe('UsersController', () => {
     return { controller, usersService, userRepository, req };
   }
 
+  function withMultipartAvatar(
+    req: AuthenticatedRequest,
+    file:
+      | {
+          originalname: string;
+          mimetype: string;
+          size: number;
+          buffer: Buffer;
+        }
+      | undefined,
+  ): AuthenticatedRequest {
+    return Object.assign(req, {
+      isMultipart: () => true,
+      file: jest.fn().mockResolvedValue(file === undefined ? undefined : toMultipartPart(file)),
+    }) as AuthenticatedRequest;
+  }
+
+  function toMultipartPart(file: {
+    originalname: string;
+    mimetype: string;
+    size: number;
+    buffer: Buffer;
+  }): unknown {
+    const stream = Readable.from(file.buffer) as Readable & { truncated?: boolean };
+    stream.truncated = false;
+    return {
+      type: 'file',
+      fieldname: 'avatar',
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      file: stream,
+      fields: {},
+    };
+  }
+
   it('передаёт роль администратора с идентификатором инициатора (Req 3)', async () => {
     const { controller, usersService, req } = buildController();
     await controller.transferAdmin('u1', req);
@@ -97,6 +140,34 @@ describe('UsersController', () => {
       email: 'new@example.com',
       displayName: 'Новое имя',
     });
+  });
+
+  it('делегирует загрузку аватара выбранного пользователя Администратором', async () => {
+    const { controller, usersService, req } = buildController();
+    const file = {
+      originalname: 'avatar.png',
+      mimetype: 'image/png',
+      size: 2048,
+      buffer: Buffer.from('image-bytes'),
+    };
+
+    await controller.uploadAvatar('u1', withMultipartAvatar(req, file));
+
+    expect(usersService.setAvatar).toHaveBeenCalledWith('admin-1', 'u1', {
+      originalName: 'avatar.png',
+      mimeType: 'image/png',
+      sizeBytes: 11,
+      buffer: Buffer.from('image-bytes'),
+    });
+  });
+
+  it('отклоняет загрузку аватара без файла', async () => {
+    const { controller, usersService, req } = buildController();
+
+    await expect(
+      controller.uploadAvatar('u1', withMultipartAvatar(req, undefined)),
+    ).rejects.toBeInstanceOf(ValidationException);
+    expect(usersService.setAvatar).not.toHaveBeenCalled();
   });
 
   it('восстанавливает Пользователя по выбранному адресу (Req 7.2)', async () => {

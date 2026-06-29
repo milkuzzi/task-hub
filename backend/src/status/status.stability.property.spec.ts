@@ -43,6 +43,7 @@ describe('Property 27: Стабильность статуса при недоп
   const actorArb: fc.Arbitrary<Actor> = fc.constantFrom<Actor>('EXECUTOR', 'MANAGER', 'ADMIN');
   const actionArb: fc.Arbitrary<StatusAction> = fc.oneof(
     fc.constant<StatusAction>({ type: 'COMPLETE' }),
+    fc.constant<StatusAction>({ type: 'START_WORK' }),
     fc.constant<StatusAction>({ type: 'REOPEN' }),
     fc.constant<StatusAction>({ type: 'CANCEL' }),
     fc.constant<StatusAction>({ type: 'RETURN' }),
@@ -65,6 +66,8 @@ describe('Property 27: Стабильность статуса при недоп
     switch (action.type) {
       case 'COMPLETE':
         return current === 'IN_PROGRESS' || current === 'WAITING' ? 'DONE' : null;
+      case 'START_WORK':
+        return current === 'WAITING' ? 'IN_PROGRESS' : null;
       case 'REOPEN':
         return current === 'DONE' ? 'IN_PROGRESS' : null;
       case 'CANCEL':
@@ -94,6 +97,9 @@ describe('Property 27: Стабильность статуса при недоп
     }
     if (action.type === 'ADMIN_SET' || action.type === 'CANCEL') {
       return actor === 'ADMIN';
+    }
+    if (action.type === 'REQUEST_ADMIN') {
+      return actor === 'MANAGER';
     }
     return true; // MANAGER или ADMIN для прочих действий
   }

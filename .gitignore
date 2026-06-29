@@ -35,3 +35,4 @@ storage/
 # Local browser smoke artifacts
 dogfood-output/
 frontend/dogfood-output/
+frontend/test-results/

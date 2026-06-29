@@ -1,22 +1,7 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Post,
-  Req,
-  Res,
-  StreamableFile,
-  UploadedFile,
-  UseGuards,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { Response } from 'express';
-import {
-  AccessDeniedException,
-  EntityNotFoundException,
-  ValidationException,
-} from '../common/errors';
+import { Controller, Get, Param, Post, Req, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
+import { AccessDeniedException, EntityNotFoundException } from '../common/errors';
+import { readSingleMultipartFile, setResponseHeaders, type HttpResponseLike } from '../common/http';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { ChatService } from '../chat';
 import { AttachmentMetaView, toAttachmentMeta } from '../chat';
@@ -27,29 +12,11 @@ import { UploadFile } from './attachments.types';
 /**
  * Единый лимит размера загружаемого Вложения — 25 МБ (Req 12.2, 12.3).
  *
- * Задаётся на интерсепторе загрузки (быстрый отказ до буферизации тела) и
- * дополнительно перепроверяется {@link AttachmentsService} по значению из
+ * Задаётся при streaming-разборе multipart-запроса и дополнительно
+ * перепроверяется {@link AttachmentsService} по значению из
  * конфигурации — источника истины (двойной контроль, Req 12.3).
  */
 const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
-
-/**
- * Минимально необходимое представление загруженного файла из multer
- * (`memoryStorage`), используемое контроллером (Req 12.1–12.5).
- *
- * Описано локально, чтобы не зависеть от внешних типов multer: содержимое
- * приходит буфером в памяти, метаданные — из формы.
- */
-interface UploadedMulterFile {
-  /** Исходное имя файла. */
-  originalname: string;
-  /** MIME-тип файла (тип не ограничивается, Req 12.5). */
-  mimetype: string;
-  /** Размер содержимого в байтах. */
-  size: number;
-  /** Содержимое файла целиком в памяти. */
-  buffer: Buffer;
-}
 
 /**
  * HTTP-слой Вложений Чата Задачи (Req 6.1–6.5 спеки; Req 11.9, 11.10, 12).
@@ -101,7 +68,7 @@ export class AttachmentsController {
    * 12.1–12.5).
    *
    * Поле формы — `file` (контракт `frontend/src/lib/chat-api.ts`). Лимит 25 МБ
-   * задаётся на интерсепторе и перепроверяется сервисом; тип файла не
+   * задаётся при streaming-разборе и перепроверяется сервисом; тип файла не
    * ограничивается (Req 12.5). Делегирует
    * {@link AttachmentsService.uploadToTask}: членство в чате, лимиты и хранение
    * вне веб-корня выполняет сервис. Возвращает метаданные созданного Вложения.
@@ -109,19 +76,18 @@ export class AttachmentsController {
   @Post('tasks/:id/attachments')
   @UseGuards(RateLimitGuard)
   @RateLimit('upload')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: ATTACHMENT_MAX_BYTES } }))
   async upload(
     @Param('id') taskId: string,
-    @UploadedFile() file: UploadedMulterFile | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<AttachmentMetaView> {
     const userId = this.principal(req).userId;
-    if (file === undefined) {
-      throw new ValidationException('Файл не передан: ожидается поле «file».');
-    }
+    const file = await readSingleMultipartFile(req as unknown as FastifyRequest, {
+      fieldName: 'file',
+      maxBytes: ATTACHMENT_MAX_BYTES,
+    });
     const uploadFile: UploadFile = {
-      originalName: file.originalname,
-      mimeType: file.mimetype,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
       declaredSize: file.size,
       content: file.buffer,
     };
@@ -147,11 +113,11 @@ export class AttachmentsController {
   async content(
     @Param('id') attachmentId: string,
     @Req() req: AuthenticatedRequest,
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res: HttpResponseLike,
   ): Promise<StreamableFile> {
     const userId = this.principal(req).userId;
     const compressed = await this.attachmentsService.openCompressed(userId, attachmentId);
-    res.set({
+    setResponseHeaders(res, {
       'X-Compression': compressed.compression,
       'X-Checksum': compressed.checksum,
     });
@@ -159,21 +125,21 @@ export class AttachmentsController {
   }
 
   /**
-   * Документный PDF-предпросмотр табличного Вложения.
+   * PDF-предпросмотр офисного Вложения.
    *
    * В отличие от `/content`, этот endpoint отдаёт не исходный файл, а
-   * серверный рендер в PDF, чтобы сохранить форматирование таблиц. Доступ и
+   * серверный рендер в PDF, чтобы сохранить форматирование документа. Доступ и
    * видимость проверяет {@link AttachmentsService.openDocumentPreview}.
    */
   @Get('attachments/:id/preview')
   async preview(
     @Param('id') attachmentId: string,
     @Req() req: AuthenticatedRequest,
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res: HttpResponseLike,
   ): Promise<StreamableFile> {
     const userId = this.principal(req).userId;
     const preview = await this.attachmentsService.openDocumentPreview(userId, attachmentId);
-    res.set({
+    setResponseHeaders(res, {
       'Cache-Control': 'no-store',
       'Content-Disposition': `inline; filename="preview.pdf"; filename*=UTF-8''${encodeURIComponent(
         preview.fileName,

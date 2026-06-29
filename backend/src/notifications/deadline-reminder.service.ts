@@ -119,7 +119,7 @@ export class DeadlineReminderService {
       .map((a) => a.userId);
 
     for (const threshold of due) {
-      await this.sendThreshold(task.id, threshold, executorIds, managerIds);
+      await this.sendThreshold(task.id, task.title, threshold, executorIds, managerIds);
     }
   }
 
@@ -133,12 +133,13 @@ export class DeadlineReminderService {
    */
   private async sendThreshold(
     taskId: string,
+    taskTitle: string,
     threshold: ReminderThreshold,
     executorIds: string[],
     managerIds: string[],
   ): Promise<void> {
     await this.reminders.markSent(taskId, threshold);
-    await this.router.notifyDeadlineReminder(taskId, threshold, executorIds, managerIds);
+    await this.router.notifyDeadlineReminder(taskId, threshold, executorIds, managerIds, taskTitle);
     this.logger.debug(`Напоминание о Дедлайне «${threshold}» отправлено по Задаче «${taskId}».`);
   }
 

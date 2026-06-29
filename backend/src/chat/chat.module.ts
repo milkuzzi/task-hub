@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { AuditLogModule } from '../audit';
 import { AuthModule } from '../auth';
-import { NotificationsModule } from '../notifications';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SecurityModule } from '../security';
 import { StatusModule } from '../status';
-import { TasksModule } from '../tasks';
+import { TasksModule } from '../tasks/tasks.module';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';

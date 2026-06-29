@@ -1,5 +1,10 @@
 export { TasksService } from './tasks.service';
 export { TasksModule } from './tasks.module';
+export {
+  TaskRealtimeDispatcher,
+  type TaskRealtimeReason,
+  type TaskRealtimeUpdate,
+} from './task-realtime.dispatcher';
 export { CreateTaskDto, AssignmentDto, UpdateTaskDto, TASK_PARAM_BOUNDS } from './dto';
 export {
   AUDIT_RECORDER,

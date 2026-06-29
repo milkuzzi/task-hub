@@ -20,11 +20,13 @@ export interface MaxOAuthPort {
    * ответственность прикладного слоя ({@link import('../../auth').AuthService}).
    *
    * @param authCode Одноразовый код авторизации, выданный MAX.
+   * @param redirectUri Redirect URI, использованный при авторизации. Должен
+   *   совпадать с переданным MAX на шаге выдачи кода.
    * @returns Идентификатор профиля MAX (`maxUserId`).
    * @throws MaxOAuthExchangeError Если авторизация на стороне MAX отклонена,
    *   код недействителен, сервис недоступен либо ответ некорректен (Req 16.3).
    */
-  exchangeAuthCode(authCode: string): Promise<string>;
+  exchangeAuthCode(authCode: string, redirectUri?: string): Promise<string>;
 }
 
 /**

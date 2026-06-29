@@ -197,13 +197,11 @@ describe('Property 17: Валидация аватара и привязки MAX
 
   const commandArb: fc.Arbitrary<Command> = fc.oneof(
     fileArb.map((file): Command => ({ kind: 'avatar', file })),
-    maxProfileArb.map(
-      ({ profile, seedForeignDuplicate }): Command => ({
-        kind: 'max',
-        profile,
-        seedForeignDuplicate,
-      }),
-    ),
+    maxProfileArb.map(({ profile, seedForeignDuplicate }): Command => ({
+      kind: 'max',
+      profile,
+      seedForeignDuplicate,
+    })),
   );
 
   it('операция принимается ⇔ допустимый аватар (формат+размер ≤5 МБ) или свой верифицированный профиль MAX без конфликта; иначе отклоняется без изменения профиля', async () => {

@@ -1,11 +1,14 @@
-import { Prisma, Role, TaskStatus } from '@prisma/client';
+import { AssignmentKind, Prisma, Role, TaskStatus } from '@prisma/client';
 import { ValidationException } from '../common/errors';
 import { hasAdminPrivileges } from '../users/permissions';
 import {
   NormalizedSearchQuery,
   NormalizedTaskFilters,
+  DEFAULT_TASK_SORT,
   SEARCH_TEXT_BOUNDS,
   SearchQuery,
+  TASK_SORT_DIRECTIONS,
+  TASK_SORT_FIELDS,
   TaskFilters,
 } from './search.types';
 
@@ -24,6 +27,9 @@ import {
 
 /** Множество допустимых Статусов Задачи для проверки значений фильтра. */
 const VALID_STATUSES: ReadonlySet<string> = new Set(Object.values(TaskStatus));
+const VALID_ASSIGNMENT_KINDS: ReadonlySet<string> = new Set(Object.values(AssignmentKind));
+const VALID_SORT_FIELDS: ReadonlySet<string> = new Set(TASK_SORT_FIELDS);
+const VALID_SORT_DIRECTIONS: ReadonlySet<string> = new Set(TASK_SORT_DIRECTIONS);
 
 /**
  * Проверяет строку поискового запроса против границ длины (Req 18.1, 18.2).
@@ -125,6 +131,15 @@ export function validateTaskFilters(
     }
   }
 
+  if (filters.assignmentKind !== undefined) {
+    if (!VALID_ASSIGNMENT_KINDS.has(filters.assignmentKind as string)) {
+      throw new ValidationException(
+        `Недопустимое значение фильтра по роли в задаче: «${filters.assignmentKind}».`,
+      );
+    }
+    normalized.assignmentKind = filters.assignmentKind;
+  }
+
   return hasActiveFilter(normalized) ? normalized : undefined;
 }
 
@@ -150,7 +165,8 @@ function hasActiveFilter(filters: NormalizedTaskFilters): boolean {
     filters.statuses !== undefined ||
     filters.deadlineFrom !== undefined ||
     filters.deadlineTo !== undefined ||
-    filters.participantIds !== undefined
+    filters.participantIds !== undefined ||
+    filters.assignmentKind !== undefined
   );
 }
 
@@ -171,7 +187,16 @@ function hasActiveFilter(filters: NormalizedTaskFilters): boolean {
 export function validateSearchQuery(query: SearchQuery): NormalizedSearchQuery {
   const text = validateSearchText(query.text);
   const filters = validateTaskFilters(query.filters);
-  const result: NormalizedSearchQuery = {};
+  const sortBy = query.sortBy ?? DEFAULT_TASK_SORT.field;
+  const sortDirection = query.sortDirection ?? DEFAULT_TASK_SORT.direction;
+  if (!VALID_SORT_FIELDS.has(sortBy)) {
+    throw new ValidationException(`Недопустимое поле сортировки: «${sortBy}».`);
+  }
+  if (!VALID_SORT_DIRECTIONS.has(sortDirection)) {
+    throw new ValidationException(`Недопустимое направление сортировки: «${sortDirection}».`);
+  }
+
+  const result: NormalizedSearchQuery = { sortBy, sortDirection };
   if (text !== undefined) {
     result.text = text;
   }
@@ -227,7 +252,10 @@ function buildTextWhere(text: string | undefined): Prisma.TaskWhereInput | undef
  * которые объединяются конъюнктивно ({@link buildSearchWhere}) — результат
  * удовлетворяет всем выбранным фильтрам одновременно (логическое И, Req 18.3).
  */
-function buildFilterWhere(filters: NormalizedTaskFilters | undefined): Prisma.TaskWhereInput[] {
+function buildFilterWhere(
+  userId: string,
+  filters: NormalizedTaskFilters | undefined,
+): Prisma.TaskWhereInput[] {
   if (filters === undefined) {
     return [];
   }
@@ -250,6 +278,12 @@ function buildFilterWhere(filters: NormalizedTaskFilters | undefined): Prisma.Ta
 
   if (filters.participantIds !== undefined && filters.participantIds.length > 0) {
     clauses.push({ assignments: { some: { userId: { in: filters.participantIds } } } });
+  }
+
+  if (filters.assignmentKind !== undefined) {
+    clauses.push({
+      assignments: { some: { userId, kind: filters.assignmentKind } },
+    });
   }
 
   return clauses;
@@ -278,7 +312,7 @@ function buildFilterWhere(filters: NormalizedTaskFilters | undefined): Prisma.Ta
 export function buildSearchWhere(
   userId: string,
   role: Role,
-  query: NormalizedSearchQuery,
+  query: Pick<NormalizedSearchQuery, 'text' | 'filters'>,
 ): Prisma.TaskWhereInput {
   const and: Prisma.TaskWhereInput[] = [buildVisibilityWhere(userId, role)];
 
@@ -287,7 +321,7 @@ export function buildSearchWhere(
     and.push(textWhere);
   }
 
-  and.push(...buildFilterWhere(query.filters));
+  and.push(...buildFilterWhere(userId, query.filters));
 
   return { AND: and };
 }

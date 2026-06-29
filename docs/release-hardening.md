@@ -2,15 +2,15 @@
 
 ## Browser Sessions
 
-Task Hub keeps bearer access tokens in `localStorage` for this release. This is
-an accepted residual risk: a future XSS vulnerability could read an active
-token. Production nginx mitigates the risk with a restrictive Content Security
-Policy, `nosniff`, and a strict referrer policy.
+Task Hub uses an HttpOnly `taskhub_session` cookie for browser sessions. The
+frontend no longer persists bearer tokens in `localStorage`; REST and Socket.IO
+requests authenticate through same-origin credentials.
 
-An HttpOnly-cookie session/refresh design remains the preferred long-term
-mitigation, but requires coordinated CSRF, CORS, Socket.IO, and backend auth
-changes outside this hardening pass. Vite development mode does not reproduce
-the production CSP and must not be exposed as a production server.
+The backend still accepts legacy `Authorization: Bearer` tokens and legacy
+Socket.IO `auth.token` during the transition, but the browser client does not
+write them to persistent storage. Production edge headers still provide CSP,
+`nosniff`, and a strict referrer policy. Vite development mode does not
+reproduce the production CSP and must not be exposed as a production server.
 
 ## Trusted Proxy Boundary
 
@@ -39,8 +39,10 @@ migration roles.
 
 `BACKUP_MODE=disabled` prevents the built-in worker from scheduling jobs.
 Manual service execution records a `SKIPPED` outcome. `BACKUP_MODE=required`
-runs the configured restic/S3 path and records missing configuration or runtime
-errors as `FAILED`.
+runs the configured restic path and records missing restic configuration or
+runtime errors as `FAILED`. The S3 manifest upload is optional: when S3 is not
+fully configured, the restic snapshot can still be recorded as `SUCCESS`, but
+`verifyIntegrity()` cannot use the S3 manifest path.
 
 For production, configure:
 
@@ -58,6 +60,18 @@ database.
 Release readiness requires an operator-run restore drill from the offsite
 restic repository. This repository verification cannot substitute for that
 drill.
+
+The application exposes Prometheus gauges for release gates:
+
+- `taskhub_backup_mode_required` must be `1` in production.
+- `taskhub_backup_restic_offsite_configured` must be `1`; local filesystem
+  restic repositories are not considered offsite.
+
+Run the production smoke after deployment:
+
+```bash
+TASKHUB_BASE_URL=https://your-domain.example npm run smoke:release
+```
 
 ## Container Health
 
@@ -82,24 +96,18 @@ full startup smoke.
 
 Safe upgrades applied in this hardening pass include NestJS 11 packages,
 `bcrypt@6`, `bullmq@5.79.1`, Socket.IO `4.8.3`, `axios@1.18.1`,
-Vite/Vitest current major releases, and a root `ws@8.21.0` override.
+Vite/Vitest current major releases, a root `ws@8.21.0` override, and a
+targeted `@istanbuljs/load-nyc-config` override to keep `js-yaml` on a patched
+release in the Jest/Istanbul tooling chain.
 
-As of the verification run on 2026-06-24, the production audit has no critical
-advisories and one residual high-risk chain:
+As of the 2026-06-28 hardening pass, the backend HTTP runtime uses Fastify.
+Upload parsing is handled by `@fastify/multipart` with explicit file, part,
+field, header, and byte limits. `@nestjs/platform-express` and `multer` are no
+longer production dependencies; `npm ls multer @nestjs/platform-express
+--omit=dev --workspace backend` should return an empty tree.
 
-- `@nestjs/platform-express@11.1.27` hard-pins `multer@2.1.1`.
-- `multer <2.2.0` is flagged for upload-related denial of service advisories.
-- npm's suggested fix downgrades Nest packages to 7.x, which is not a safe
-  remediation path for this application.
-
-Mitigations until Nest publishes an adapter release with `multer >=2.2.0`:
-attachment upload requires an authenticated session, the upload route is rate
-limited, multer has a 25 MB file-size limit, the backend is not supported as a
-direct public edge, and dependency audit remains a release gate.
-
-The full audit also reports dev/tooling moderate advisories in the Jest/ts-jest
-chain plus non-runtime parser utilities. These are not production dependencies;
-they should be revisited when upgrading the backend test stack.
+`npm audit` and production-only audits for both workspaces must report zero
+known vulnerabilities before release.
 
 ## Repository Artifacts
 

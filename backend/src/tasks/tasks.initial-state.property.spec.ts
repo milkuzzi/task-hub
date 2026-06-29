@@ -54,6 +54,9 @@ describe('Property 23: Начальное состояние созданной 
     } as unknown as User;
 
     const findActiveById = jest.fn(async (id: string) => (id === actorId ? actor : null));
+    const findManyActiveByIds = jest.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, role: Role.MANAGER, deletedAt: null, isActive: true }) as User),
+    );
 
     let createInput: Prisma.TaskCreateInput | undefined;
     const create = jest.fn(async (data: Prisma.TaskCreateInput) => {
@@ -74,7 +77,7 @@ describe('Property 23: Начальное состояние созданной 
     });
 
     const taskRepository = { create } as unknown as TaskRepository;
-    const userRepository = { findActiveById } as unknown as UserRepository;
+    const userRepository = { findActiveById, findManyActiveByIds } as unknown as UserRepository;
     const config = { limits: LIMITS } as unknown as AppConfigService;
 
     const service = new TasksService(

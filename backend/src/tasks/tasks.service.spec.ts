@@ -53,6 +53,9 @@ function buildService(overrides: { actors?: Record<string, User> } = {}) {
   const actors = overrides.actors ?? { manager: makeActor({ id: 'manager', role: Role.MANAGER }) };
 
   const findActiveById = jest.fn(async (id: string) => actors[id] ?? null);
+  const findManyActiveByIds = jest.fn(async (ids: string[]) =>
+    ids.map((id) => actors[id] ?? inferActiveUser(id)).filter((u): u is User => u !== null),
+  );
 
   let createInput: Prisma.TaskCreateInput | undefined;
   const storedTasks: TaskWithAssignments[] = [];
@@ -106,7 +109,7 @@ function buildService(overrides: { actors?: Record<string, User> } = {}) {
   });
 
   const taskRepository = { create, list } as unknown as TaskRepository;
-  const userRepository = { findActiveById } as unknown as UserRepository;
+  const userRepository = { findActiveById, findManyActiveByIds } as unknown as UserRepository;
   const config = { limits: LIMITS } as unknown as AppConfigService;
   const enqueueTaskAssigned = jest.fn<Promise<void>, [unknown]>(async () => undefined);
 
@@ -122,10 +125,24 @@ function buildService(overrides: { actors?: Record<string, User> } = {}) {
     service,
     create,
     findActiveById,
+    findManyActiveByIds,
     list,
     enqueueTaskAssigned,
     getCreateInput: () => createInput,
   };
+}
+
+function inferActiveUser(id: string): User | null {
+  if (id === 'ghost' || id.startsWith('missing')) {
+    return null;
+  }
+  const role =
+    id === 'admin' || id.startsWith('admin-')
+      ? Role.ADMIN
+      : id.startsWith('m') || id.includes('manager')
+        ? Role.MANAGER
+        : Role.EXECUTOR;
+  return makeActor({ id, role });
 }
 
 function matchesTaskWhere(task: TaskWithAssignments, where: Prisma.TaskWhereInput): boolean {
@@ -134,8 +151,7 @@ function matchesTaskWhere(task: TaskWithAssignments, where: Prisma.TaskWhereInpu
   }
   const some = (
     where.assignments as
-      | { some?: { userId?: string; kind?: AssignmentKind | { in?: AssignmentKind[] } } }
-      | undefined
+      { some?: { userId?: string; kind?: AssignmentKind | { in?: AssignmentKind[] } } } | undefined
   )?.some;
   if (some === undefined) {
     return true;
@@ -211,7 +227,7 @@ describe('TasksService.create — успешное создание (Req 9.2, 9.
     expect(managers).toEqual(['other-manager', 'manager']);
   });
 
-  it('добавляет создающего Администратора в менеджеры задачи, если он не выбран явно', async () => {
+  it('не добавляет создающего Администратора в менеджеры задачи', async () => {
     const { service, getCreateInput } = buildService({
       actors: { admin: makeActor({ id: 'admin', role: Role.ADMIN }) },
     });
@@ -221,7 +237,27 @@ describe('TasksService.create — успешное создание (Req 9.2, 9.
     const managers = createdAssignments(getCreateInput())
       .filter((a) => a.kind === AssignmentKind.MANAGER)
       .map((a) => a.userId);
-    expect(managers).toEqual(['manager-1', 'admin']);
+    expect(managers).toEqual(['manager-1']);
+  });
+
+  it('отклоняет Администратора в списке менеджеров при создании задачи', async () => {
+    const { service, create } = buildService({
+      actors: { admin: makeActor({ id: 'admin', role: Role.ADMIN }) },
+    });
+
+    await expect(
+      service.create('admin', validDto({ managerIds: ['admin'] })),
+    ).rejects.toBeInstanceOf(ValidationException);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('отклоняет Администратора в списке исполнителей при создании задачи', async () => {
+    const { service, create } = buildService();
+
+    await expect(
+      service.create('manager', validDto({ executorIds: ['admin'] })),
+    ).rejects.toBeInstanceOf(ValidationException);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('возвращает созданную задачу в списке создающего Менеджера', async () => {
@@ -240,17 +276,34 @@ describe('TasksService.create — успешное создание (Req 9.2, 9.
   it('ставит уведомления о назначении всем начальным участникам задачи', async () => {
     const { service, enqueueTaskAssigned } = buildService();
 
-    await service.create(
-      'manager',
-      validDto({ executorIds: ['e1', 'e2'], managerIds: ['m1'] }),
-    );
+    await service.create('manager', validDto({ executorIds: ['e1', 'e2'], managerIds: ['m1'] }));
 
     expect(enqueueTaskAssigned).toHaveBeenCalledTimes(4);
     expect(enqueueTaskAssigned.mock.calls.map(([event]) => event)).toEqual([
-      { taskId: 'task-1', userId: 'e1', kind: AssignmentKind.EXECUTOR },
-      { taskId: 'task-1', userId: 'e2', kind: AssignmentKind.EXECUTOR },
-      { taskId: 'task-1', userId: 'm1', kind: AssignmentKind.MANAGER },
-      { taskId: 'task-1', userId: 'manager', kind: AssignmentKind.MANAGER },
+      {
+        taskId: 'task-1',
+        userId: 'e1',
+        kind: AssignmentKind.EXECUTOR,
+        taskTitle: 'Подготовить отчёт',
+      },
+      {
+        taskId: 'task-1',
+        userId: 'e2',
+        kind: AssignmentKind.EXECUTOR,
+        taskTitle: 'Подготовить отчёт',
+      },
+      {
+        taskId: 'task-1',
+        userId: 'm1',
+        kind: AssignmentKind.MANAGER,
+        taskTitle: 'Подготовить отчёт',
+      },
+      {
+        taskId: 'task-1',
+        userId: 'manager',
+        kind: AssignmentKind.MANAGER,
+        taskTitle: 'Подготовить отчёт',
+      },
     ]);
   });
 

@@ -19,12 +19,18 @@ RUN npx prisma generate \
 # ---- runtime ----
 FROM node:22-alpine AS runtime
 WORKDIR /app
-RUN apk add --no-cache font-dejavu libreoffice libreoffice-calc openssl wget
-ENV NODE_ENV=production
+RUN apk add --no-cache ca-certificates font-carlito font-dejavu font-liberation libreoffice libreoffice-calc openssl postgresql-client restic wget \
+ && wget -qO /usr/local/share/ca-certificates/russian_trusted_root_ca.crt \
+      https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt \
+ && wget -qO /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt \
+      https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt \
+ && update-ca-certificates
+ENV NODE_ENV=production \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 # Артефакты: собранный backend, узлы зависимостей (вкл. prisma CLI + клиент),
 # схема и миграции Prisma.
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/prisma ./prisma

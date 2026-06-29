@@ -24,7 +24,7 @@ import {
  *
  * Проверяют тонкую маршрутизацию HTTP → {@link ChatService}/{@link AttachmentsService}:
  * проброс инициатора и параметров, формирование контракта `AttachmentMeta`,
- * отображение multer-файла в форму сервиса, проброс отказа доступа без
+ * отображение multipart-файла в форму сервиса, проброс отказа доступа без
  * раскрытия (Req 6.5, 2.12), отдачу потоков (`StreamableFile`) и заголовков
  * распаковки, поведение лимита 25 МБ (отклонение сервисом) и отдачу миниатюр.
  * Доменные правила, лимиты и членство проверяются в тестах сервисов; здесь
@@ -34,7 +34,6 @@ describe('AttachmentsController', () => {
   const TASK_ID = 'task-1';
   const ATTACHMENT_ID = 'att-1';
   const NOW = new Date('2026-06-19T10:00:00.000Z');
-  const MAX_BYTES = 25 * 1024 * 1024;
 
   function makeAttachmentRow(): AttachmentWithCreatedAt {
     return {
@@ -148,6 +147,29 @@ describe('AttachmentsController', () => {
     };
   }
 
+  function withMultipartFile(
+    req: AuthenticatedRequest,
+    file: ReturnType<typeof makeMulterFile> | undefined,
+  ): AuthenticatedRequest {
+    return Object.assign(req, {
+      isMultipart: () => true,
+      file: jest.fn().mockResolvedValue(file === undefined ? undefined : toMultipartPart(file)),
+    }) as AuthenticatedRequest;
+  }
+
+  function toMultipartPart(file: ReturnType<typeof makeMulterFile>): unknown {
+    const stream = Readable.from(file.buffer) as Readable & { truncated?: boolean };
+    stream.truncated = false;
+    return {
+      type: 'file',
+      fieldname: 'file',
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      file: stream,
+      fields: {},
+    };
+  }
+
   it('возвращает список Вложений в форме контракта с createdAt сообщения (Req 6.1, 11.10)', async () => {
     const { controller, chatService, req } = buildController();
     const list = await controller.list(TASK_ID, req);
@@ -167,13 +189,13 @@ describe('AttachmentsController', () => {
     ]);
   });
 
-  it('отображает multer-файл в форму сервиса и возвращает метаданные (Req 6.2, 12.1–12.5)', async () => {
+  it('отображает multipart-файл в форму сервиса и возвращает метаданные (Req 6.2, 12.1–12.5)', async () => {
     const { controller, attachmentsService, req } = buildController();
-    const meta = await controller.upload(TASK_ID, makeMulterFile(), req);
+    const meta = await controller.upload(TASK_ID, withMultipartFile(req, makeMulterFile()));
     expect(attachmentsService.uploadToTask).toHaveBeenCalledWith('executor-1', TASK_ID, {
       originalName: 'doc.pdf',
       mimeType: 'application/pdf',
-      declaredSize: 4096,
+      declaredSize: 10,
       content: Buffer.from('file-bytes'),
     });
     expect(meta).toMatchObject({ id: 'att-new', originalName: 'doc.pdf', hasThumbnail: false });
@@ -181,9 +203,9 @@ describe('AttachmentsController', () => {
 
   it('отклоняет загрузку без файла (Req 6.2)', async () => {
     const { controller, attachmentsService, req } = buildController();
-    await expect(controller.upload(TASK_ID, undefined, req)).rejects.toBeInstanceOf(
-      ValidationException,
-    );
+    await expect(
+      controller.upload(TASK_ID, withMultipartFile(req, undefined)),
+    ).rejects.toBeInstanceOf(ValidationException);
     expect(attachmentsService.uploadToTask).not.toHaveBeenCalled();
   });
 
@@ -192,8 +214,9 @@ describe('AttachmentsController', () => {
     attachmentsService.uploadToTask.mockRejectedValueOnce(
       new ValidationException('Размер файла превышает допустимый предел 25 МБ.'),
     );
-    const big = { ...makeMulterFile(), size: MAX_BYTES + 1 };
-    await expect(controller.upload(TASK_ID, big, req)).rejects.toBeInstanceOf(ValidationException);
+    await expect(
+      controller.upload(TASK_ID, withMultipartFile(req, makeMulterFile())),
+    ).rejects.toBeInstanceOf(ValidationException);
   });
 
   it('отдаёт сжатый поток содержимого с заголовками распаковки (Req 6.3, 12.8, 12.9)', async () => {

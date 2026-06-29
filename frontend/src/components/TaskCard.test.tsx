@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
-import { TaskCard } from './TaskCard';
-import type { TaskCard as TaskCardModel } from '@/lib/tasks-api';
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { TaskCard } from "./TaskCard";
+import type { TaskCard as TaskCardModel } from "@/lib/tasks-api";
 
 /**
  * Компонентные тесты карточки Задачи (Req 1.2, 2.8, 9.7, 9.8).
@@ -13,66 +13,90 @@ import type { TaskCard as TaskCardModel } from '@/lib/tasks-api';
  */
 function task(overrides: Partial<TaskCardModel> = {}): TaskCardModel {
   return {
-    id: 'task-1',
-    title: 'Подготовить отчёт',
-    description: 'Краткое описание',
-    deadline: '2024-01-02T09:30:00.000Z', // 12:30 MSK
-    status: 'IN_PROGRESS',
+    id: "task-1",
+    title: "Подготовить отчёт",
+    description: "Краткое описание",
+    deadline: "2024-01-02T09:30:00.000Z", // 12:30 MSK
+    status: "IN_PROGRESS",
     messageCount: 5,
     hasUnread: false,
     isOverdue: false,
+    executorIds: ["executor-1"],
+    managerIds: ["manager-1"],
     ...overrides,
   };
 }
 
-describe('TaskCard', () => {
-  it('отображает Название и Дедлайн в формате MSK ДД.ММ.ГГГГ ЧЧ:ММ', () => {
+describe("TaskCard", () => {
+  it("отображает Название и Дедлайн в формате MSK ДД.ММ.ГГГГ ЧЧ:ММ", () => {
     const { container } = render(<TaskCard task={task()} />);
-    expect(screen.getByText('Подготовить отчёт')).toBeInTheDocument();
+    expect(screen.getByText("Подготовить отчёт")).toBeInTheDocument();
     expect(screen.getByText(/02\.01\.2024 12:30/)).toBeInTheDocument();
-    expect(container.querySelector('article.task-record')).not.toBeNull();
+    expect(container.querySelector("article.task-record")).not.toBeNull();
   });
 
-  it('показывает счётчик Сообщений', () => {
+  it("показывает счётчик Сообщений", () => {
     render(<TaskCard task={task({ messageCount: 9999 })} />);
     expect(screen.getByText(/9999/)).toBeInTheDocument();
   });
 
-  it('показывает маркер непрочитанного только при наличии непрочитанных', () => {
+  it("не показывает состав участников на карточке списка", () => {
+    render(
+      <TaskCard
+        task={task({
+          executorIds: ["executor-1", "executor-2"],
+          managerIds: ["manager-1"],
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("Исполнители")).not.toBeInTheDocument();
+    expect(screen.queryByText("Менеджеры")).not.toBeInTheDocument();
+    expect(screen.queryByText("executor-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("manager-1")).not.toBeInTheDocument();
+  });
+
+  it("показывает маркер непрочитанного только при наличии непрочитанных", () => {
     const { rerender } = render(<TaskCard task={task({ hasUnread: true })} />);
-    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
 
     rerender(<TaskCard task={task({ hasUnread: false })} />);
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it('показывает индикатор «Просрочено» только для просроченной Задачи', () => {
+  it("показывает индикатор «Просрочено» только для просроченной Задачи", () => {
     const { rerender } = render(<TaskCard task={task({ isOverdue: true })} />);
-    expect(screen.getByText('Просрочено')).toBeInTheDocument();
+    expect(screen.getByText("Просрочено")).toBeInTheDocument();
 
     rerender(<TaskCard task={task({ isOverdue: false })} />);
-    expect(screen.queryByText('Просрочено')).not.toBeInTheDocument();
+    expect(screen.queryByText("Просрочено")).not.toBeInTheDocument();
   });
 
-  it('не рендерит отдельные кнопки «Открыть» и «Изменить»', () => {
+  it("не рендерит отдельные кнопки «Открыть» и «Изменить»", () => {
     render(<TaskCard task={task()} onOpen={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: 'Открыть' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Изменить' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Открыть" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Изменить" }),
+    ).not.toBeInTheDocument();
   });
 
-  it('вызывает onOpen с идентификатором Задачи при клике и с клавиатуры', async () => {
+  it("вызывает onOpen с идентификатором Задачи при клике и с клавиатуры", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
     render(<TaskCard task={task()} onOpen={onOpen} />);
 
-    const card = screen.getByRole('button', { name: 'Открыть: Подготовить отчёт' });
+    const card = screen.getByRole("button", {
+      name: "Открыть: Подготовить отчёт",
+    });
 
     await user.click(card);
-    expect(onOpen).toHaveBeenCalledWith('task-1');
+    expect(onOpen).toHaveBeenCalledWith("task-1");
 
     card.focus();
-    await user.keyboard('{Enter}');
-    await user.keyboard(' ');
+    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
     expect(onOpen).toHaveBeenCalledTimes(3);
   });
 });

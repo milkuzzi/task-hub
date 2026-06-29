@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { Role } from '@prisma/client';
 import { AccessDeniedException, ValidationException } from '../common/errors';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
@@ -10,7 +11,7 @@ import { UsersService } from './users.service';
  * Контроллерные тесты {@link ProfileController} (задача 3.2).
  *
  * Проверяют тонкую маршрутизацию HTTP → {@link UsersService}: отображение
- * multer-файла в форму {@link UploadedFile} и делегирование загрузки аватара
+ * multipart-файла в форму {@link UploadedFile} и делегирование загрузки аватара
  * собственному Пользователю (инициатор == цель), отклонение запроса без файла,
  * обмен кода авторизации MAX через порт и последующую привязку профиля, проброс
  * доменных ошибок и формирование представления `CurrentUser`. Доменные правила
@@ -19,7 +20,6 @@ import { UsersService } from './users.service';
  */
 describe('ProfileController', () => {
   const USER_ID = 'user-1';
-  const MAX_BYTES = 5 * 1024 * 1024;
 
   const currentUserRow = {
     id: USER_ID,
@@ -32,18 +32,39 @@ describe('ProfileController', () => {
 
   function buildController(opts: { userId?: string; role?: Role } = {}): {
     controller: ProfileController;
-    usersService: { setAvatar: jest.Mock; linkMax: jest.Mock };
-    userRepository: { findByIdWithMaxLink: jest.Mock };
+    usersService: {
+      setAvatar: jest.Mock;
+      updateProfile: jest.Mock;
+      linkMax: jest.Mock;
+      unlinkMax: jest.Mock;
+    };
+    userRepository: {
+      findByIdWithMaxLink: jest.Mock;
+      findMaxLinkByUserId: jest.Mock;
+      setMaxMutedAllByUserId: jest.Mock;
+    };
     maxOAuth: { exchangeAuthCode: jest.Mock };
     req: AuthenticatedRequest;
   } {
     const usersService = {
       setAvatar: jest.fn().mockResolvedValue(undefined),
+      updateProfile: jest.fn().mockResolvedValue(undefined),
       linkMax: jest.fn().mockResolvedValue(undefined),
+      unlinkMax: jest.fn().mockResolvedValue(undefined),
     };
 
     const userRepository = {
       findByIdWithMaxLink: jest.fn().mockResolvedValue(currentUserRow),
+      findMaxLinkByUserId: jest.fn().mockResolvedValue({
+        userId: USER_ID,
+        maxUserId: 'max-1',
+        mutedAll: false,
+      }),
+      setMaxMutedAllByUserId: jest.fn().mockResolvedValue({
+        userId: USER_ID,
+        maxUserId: 'max-1',
+        mutedAll: true,
+      }),
     };
 
     const maxOAuth = {
@@ -77,13 +98,36 @@ describe('ProfileController', () => {
     };
   }
 
-  it('отображает multer-файл в форму сервиса и делегирует собственному Пользователю (Req 3.1)', async () => {
+  function withMultipartFile(
+    req: AuthenticatedRequest,
+    file: ReturnType<typeof makeMulterFile> | undefined,
+  ): AuthenticatedRequest {
+    return Object.assign(req, {
+      isMultipart: () => true,
+      file: jest.fn().mockResolvedValue(file === undefined ? undefined : toMultipartPart(file)),
+    }) as AuthenticatedRequest;
+  }
+
+  function toMultipartPart(file: ReturnType<typeof makeMulterFile>): unknown {
+    const stream = Readable.from(file.buffer) as Readable & { truncated?: boolean };
+    stream.truncated = false;
+    return {
+      type: 'file',
+      fieldname: 'avatar',
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      file: stream,
+      fields: {},
+    };
+  }
+
+  it('отображает multipart-файл в форму сервиса и делегирует собственному Пользователю (Req 3.1)', async () => {
     const { controller, usersService, req } = buildController();
-    const view = await controller.uploadAvatar(makeMulterFile(), req);
+    const view = await controller.uploadAvatar(withMultipartFile(req, makeMulterFile()));
     expect(usersService.setAvatar).toHaveBeenCalledWith(USER_ID, USER_ID, {
       originalName: 'avatar.png',
       mimeType: 'image/png',
-      sizeBytes: 2048,
+      sizeBytes: 11,
       buffer: Buffer.from('image-bytes'),
     });
     expect(view).toEqual({
@@ -98,7 +142,7 @@ describe('ProfileController', () => {
 
   it('отклоняет загрузку аватара без файла (Req 3.1)', async () => {
     const { controller, usersService, req } = buildController();
-    await expect(controller.uploadAvatar(undefined, req)).rejects.toBeInstanceOf(
+    await expect(controller.uploadAvatar(withMultipartFile(req, undefined))).rejects.toBeInstanceOf(
       ValidationException,
     );
     expect(usersService.setAvatar).not.toHaveBeenCalled();
@@ -109,8 +153,20 @@ describe('ProfileController', () => {
     usersService.setAvatar.mockRejectedValueOnce(
       new ValidationException('размер аватара превышает допустимый предел в 5 МБ.'),
     );
-    const big = { ...makeMulterFile(), size: MAX_BYTES + 1 };
-    await expect(controller.uploadAvatar(big, req)).rejects.toBeInstanceOf(ValidationException);
+    await expect(
+      controller.uploadAvatar(withMultipartFile(req, makeMulterFile())),
+    ).rejects.toBeInstanceOf(ValidationException);
+  });
+
+  it('делегирует изменение собственного имени текущему пользователю', async () => {
+    const { controller, usersService, req } = buildController({ role: Role.ADMIN });
+
+    const view = await controller.updateProfile({ name: 'Новое имя' }, req);
+
+    expect(usersService.updateProfile).toHaveBeenCalledWith(USER_ID, USER_ID, {
+      displayName: 'Новое имя',
+    });
+    expect(view.id).toBe(USER_ID);
   });
 
   it('обменивает authCode и привязывает верифицированный профиль MAX (Req 3.2)', async () => {
@@ -124,11 +180,56 @@ describe('ProfileController', () => {
     expect(view.maxLinked).toBe(true);
   });
 
+  it('передаёт redirectUri при обмене authCode MAX', async () => {
+    const { controller, maxOAuth, req } = buildController();
+
+    await controller.linkMax(
+      {
+        authCode: 'code-xyz',
+        redirectUri: 'https://tasks.example.test/profile/max/callback',
+      },
+      req,
+    );
+
+    expect(maxOAuth.exchangeAuthCode).toHaveBeenCalledWith(
+      'code-xyz',
+      'https://tasks.example.test/profile/max/callback',
+    );
+  });
+
   it('не задаёт ownerUserId в профиле MAX (Req 6.9)', async () => {
     const { controller, usersService, req } = buildController();
     await controller.linkMax({ authCode: 'code-xyz' }, req);
     const profile = usersService.linkMax.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(profile).not.toHaveProperty('ownerUserId');
+  });
+
+  it('отвязывает собственный профиль MAX и возвращает обновлённый профиль', async () => {
+    const { controller, usersService, userRepository, req } = buildController();
+    userRepository.findByIdWithMaxLink.mockResolvedValueOnce({
+      ...currentUserRow,
+      maxLink: null,
+    });
+
+    const view = await controller.unlinkMax(req);
+
+    expect(usersService.unlinkMax).toHaveBeenCalledWith(USER_ID);
+    expect(view.maxLinked).toBe(false);
+  });
+
+  it('читает и обновляет общую настройку MAX-уведомлений', async () => {
+    const { controller, userRepository, req } = buildController();
+
+    await expect(controller.getMaxNotifications(req)).resolves.toEqual({
+      linked: true,
+      muted: false,
+    });
+    await expect(controller.updateMaxNotifications({ muted: true }, req)).resolves.toEqual({
+      linked: true,
+      muted: true,
+    });
+
+    expect(userRepository.setMaxMutedAllByUserId).toHaveBeenCalledWith(USER_ID, true);
   });
 
   it('приводит ошибку обмена кода авторизации MAX к доменной ValidationException (Req 3.2, 9.6)', async () => {
@@ -145,9 +246,7 @@ describe('ProfileController', () => {
   it('требует входа, если субъект не установлен (Req 1.5)', async () => {
     const { controller } = buildController();
     const anon = {} as AuthenticatedRequest;
-    await expect(controller.uploadAvatar(makeMulterFile(), anon)).rejects.toBeInstanceOf(
-      AccessDeniedException,
-    );
+    await expect(controller.uploadAvatar(anon)).rejects.toBeInstanceOf(AccessDeniedException);
   });
 
   it('SessionAuthGuard объявлен на контроллере (Req 1.5)', () => {

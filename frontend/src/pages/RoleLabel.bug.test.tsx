@@ -1,11 +1,11 @@
-import { render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProfilePage } from './ProfilePage';
-import { AdminUsersPage } from './AdminUsersPage';
-import { AuthContext, type AuthContextValue } from '@/lib/use-auth';
-import { fetchAvatarBlob } from '@/lib/avatar';
-import { listUsers, listDeletedUsers, type AdminUser } from '@/lib/users-api';
-import type { CurrentUser } from '@/lib/auth-api';
+import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProfilePage } from "./ProfilePage";
+import { AdminUsersPage } from "./AdminUsersPage";
+import { AuthContext, type AuthContextValue } from "@/lib/use-auth";
+import { fetchAvatarBlob } from "@/lib/avatar";
+import { listUsers, listDeletedUsers, type AdminUser } from "@/lib/users-api";
+import type { CurrentUser } from "@/lib/auth-api";
 
 /**
  * Exploratory-тест условия дефекта 6 (метка роли) — задача 16.
@@ -25,13 +25,15 @@ import type { CurrentUser } from '@/lib/auth-api';
 
 // `AdminUsersPage` рендерит аватары строк через защищённый `fetchAvatarBlob`,
 // а данные тянет из `users-api`. Мокаем оба, чтобы изолировать проверку метки роли.
-vi.mock('@/lib/avatar', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/avatar')>('@/lib/avatar');
+vi.mock("@/lib/avatar", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/avatar")>("@/lib/avatar");
   return { ...actual, fetchAvatarBlob: vi.fn() };
 });
 
-vi.mock('@/lib/users-api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/users-api')>('@/lib/users-api');
+vi.mock("@/lib/users-api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/users-api")>("@/lib/users-api");
   return { ...actual, listUsers: vi.fn(), listDeletedUsers: vi.fn() };
 });
 
@@ -41,10 +43,10 @@ const mockedListDeleted = vi.mocked(listDeletedUsers);
 
 function profileUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
   return {
-    id: 'user-1',
-    email: 'user@example.com',
-    name: 'Иван Петров',
-    role: 'EXECUTOR',
+    id: "user-1",
+    email: "user@example.com",
+    name: "Иван Петров",
+    role: "EXECUTOR",
     avatarPath: null,
     maxLinked: false,
     ...overrides,
@@ -53,22 +55,23 @@ function profileUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
 
 function adminUser(): AdminUser {
   return {
-    id: 'user-1',
-    email: 'user@example.com',
-    name: 'Иван Петров',
-    role: 'EXECUTOR',
+    id: "user-1",
+    email: "user@example.com",
+    name: "Иван Петров",
+    role: "EXECUTOR",
     active: true,
     locked: false,
+    avatarPath: null,
     maxLinked: false,
   };
 }
 
 function currentAdmin(): CurrentUser {
   return {
-    id: 'admin-1',
-    email: 'admin@example.com',
-    name: 'Администратор',
-    role: 'ADMIN',
+    id: "admin-1",
+    email: "admin@example.com",
+    name: "Администратор",
+    role: "ADMIN",
     avatarPath: null,
     maxLinked: false,
   };
@@ -87,7 +90,9 @@ function authValue(user: CurrentUser): AuthContextValue {
 }
 
 beforeEach(() => {
-  mockedFetchAvatar.mockResolvedValue(new Blob(['avatar'], { type: 'image/png' }));
+  mockedFetchAvatar.mockResolvedValue(
+    new Blob(["avatar"], { type: "image/png" }),
+  );
   mockedListUsers.mockResolvedValue([adminUser()]);
   mockedListDeleted.mockResolvedValue([]);
 });
@@ -98,8 +103,8 @@ afterEach(() => {
   mockedListDeleted.mockReset();
 });
 
-describe('Дефект 6 (метка роли в интерфейсе)', () => {
-  it('Property 11: профиль НЕ показывает метку «Роль: …»', () => {
+describe("Дефект 6 (метка роли в интерфейсе)", () => {
+  it("Property 11: профиль НЕ показывает метку «Роль: …»", () => {
     render(
       <AuthContext.Provider value={authValue(profileUser())}>
         <ProfilePage />
@@ -107,14 +112,14 @@ describe('Дефект 6 (метка роли в интерфейсе)', () => {
     );
 
     // Прочие сведения профиля остаются на месте (Property 12 / Req 3.6).
-    expect(screen.getByText('user@example.com')).toBeInTheDocument();
+    expect(screen.getByText("user@example.com")).toBeInTheDocument();
 
     // Property 11: метки роли быть не должно. На НЕИСПРАВЛЕННОМ коде профиль
     // рендерит «Роль: » + значение роли — поэтому утверждение ПАДАЕТ.
     expect(screen.queryByText(/Роль:/)).not.toBeInTheDocument();
   });
 
-  it('Property 11: список администрирования НЕ содержит колонку роли', async () => {
+  it("Property 11: список администрирования НЕ содержит колонку роли", async () => {
     render(
       <AuthContext.Provider value={authValue(currentAdmin())}>
         <AdminUsersPage />
@@ -122,10 +127,12 @@ describe('Дефект 6 (метка роли в интерфейсе)', () => {
     );
 
     // Дожидаемся загрузки списка Пользователей (прочие колонки сохраняются — Req 3.6).
-    await screen.findByText('user@example.com');
+    await screen.findByText("user@example.com");
 
     // Property 11: колонки роли (заголовок «Роль») быть не должно. На
     // НЕИСПРАВЛЕННОМ коде таблица рендерит `<th>Роль</th>` — утверждение ПАДАЕТ.
-    expect(screen.queryByRole('columnheader', { name: 'Роль' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Роль" }),
+    ).not.toBeInTheDocument();
   });
 });

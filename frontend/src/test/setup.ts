@@ -6,12 +6,15 @@
  *   `useTranslation`, отображали реальные русские подписи;
  * - очищает DOM после каждого теста, чтобы рендеры не пересекались.
  */
-import '@testing-library/jest-dom/vitest';
-import { afterEach, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import "@testing-library/jest-dom/vitest";
+import { afterEach, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 // Инициализация i18next (единственная локаль `ru`) — побочный эффект импорта.
-import '../i18n';
+import "../i18n";
+
+vi.stubEnv("VITE_SOCKET_DISABLED", "true");
+vi.stubEnv("VITE_SOCKET_URL", "disabled");
 
 // jsdom не реализует Object URL API. Аутентифицированная загрузка медиа
 // («fetch-as-blob») оборачивает байты в Object URL, поэтому подменяем

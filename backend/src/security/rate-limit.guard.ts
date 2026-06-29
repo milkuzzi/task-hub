@@ -1,6 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 import { isIP } from 'node:net';
 import { RateLimitException } from '../common/errors';
 import { RateLimiter } from './rate-limiter';
@@ -39,7 +38,7 @@ export class RateLimitGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context.switchToHttp().getRequest<RateLimitedRequest>();
     const source = this.resolveSource(request);
 
     const { allowed } = await this.rateLimiter.check(source, op);
@@ -53,7 +52,7 @@ export class RateLimitGuard implements CanActivate {
    * Определяет источник запроса. Предпочитается левый адрес из
    * `X-Forwarded-For` (за обратным прокси Nginx), иначе — `request.ip`.
    */
-  private resolveSource(request: Request): string {
+  private resolveSource(request: RateLimitedRequest): string {
     const forwarded = request.headers['x-forwarded-for'];
     const headerValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
     if (typeof headerValue === 'string' && headerValue.trim() !== '') {
@@ -63,6 +62,12 @@ export class RateLimitGuard implements CanActivate {
         return candidate;
       }
     }
-    return request.ip ?? 'unknown';
+    return request.ip ?? request.socket?.remoteAddress ?? 'unknown';
   }
+}
+
+interface RateLimitedRequest {
+  headers: Record<string, string | string[] | undefined>;
+  ip?: string;
+  socket?: { remoteAddress?: string };
 }

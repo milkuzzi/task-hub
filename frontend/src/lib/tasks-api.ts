@@ -1,5 +1,5 @@
-import { api } from './api';
-import type { UserRole } from './auth-api';
+import { api } from "./api";
+import type { UserRole } from "./auth-api";
 
 /**
  * Типы и REST-вызовы Задач «Системы поручений».
@@ -17,15 +17,28 @@ import type { UserRole } from './auth-api';
  */
 
 /** Статус Задачи (значения совпадают с серверным перечислением, Req 10). */
-export type TaskStatus = 'IN_PROGRESS' | 'WAITING' | 'DONE' | 'NEEDS_ADMIN' | 'CANCELLED';
+export type TaskStatus =
+  | "IN_PROGRESS"
+  | "WAITING"
+  | "DONE"
+  | "NEEDS_ADMIN"
+  | "CANCELLED";
+export type TaskAssignmentKind = "MANAGER" | "EXECUTOR";
+export type TaskSortField = "deadline" | "status" | "title";
+export type TaskSortDirection = "asc" | "desc";
+
+export const DEFAULT_TASK_SORT = {
+  field: "deadline",
+  direction: "asc",
+} as const satisfies { field: TaskSortField; direction: TaskSortDirection };
 
 /** Полный перечень Статусов для фильтра по Статусу (Req 18.3). */
 export const TASK_STATUSES: readonly TaskStatus[] = [
-  'IN_PROGRESS',
-  'WAITING',
-  'DONE',
-  'NEEDS_ADMIN',
-  'CANCELLED',
+  "IN_PROGRESS",
+  "WAITING",
+  "DONE",
+  "NEEDS_ADMIN",
+  "CANCELLED",
 ];
 
 /**
@@ -35,11 +48,11 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
  * вычисляемых строк, отвергаемых типизацией i18next.
  */
 export const TASK_STATUS_LABEL_KEYS = {
-  IN_PROGRESS: 'task.status.in_progress',
-  WAITING: 'task.status.waiting',
-  DONE: 'task.status.done',
-  NEEDS_ADMIN: 'task.status.needs_admin',
-  CANCELLED: 'task.status.cancelled',
+  IN_PROGRESS: "task.status.in_progress",
+  WAITING: "task.status.waiting",
+  DONE: "task.status.done",
+  NEEDS_ADMIN: "task.status.needs_admin",
+  CANCELLED: "task.status.cancelled",
 } as const;
 
 /** Границы параметров Задачи на клиенте (Req 9.1). Дублируют серверные. */
@@ -80,6 +93,10 @@ export interface TaskCard {
   hasUnread: boolean;
   /** Просрочена ли Задача относительно серверного текущего времени. */
   isOverdue: boolean;
+  /** Идентификаторы Исполнителей для отображения состава на карточке списка. */
+  executorIds: string[];
+  /** Идентификаторы Менеджеров для отображения состава на карточке списка. */
+  managerIds: string[];
 }
 
 /** Детальная Задача с составом участников (Req 2.12, 10.12). */
@@ -114,6 +131,8 @@ export interface TaskFilters {
   deadlineTo?: string;
   /** Фильтр по участникам: в Задаче назначен хотя бы один из Пользователей. */
   participantIds?: string[];
+  /** Фильтр по виду назначения текущего Пользователя в Задаче. */
+  assignmentKind?: TaskAssignmentKind;
 }
 
 /** Параметры запроса списка Задач (поиск + фильтры + пагинация, Req 18). */
@@ -121,6 +140,8 @@ export interface TaskQuery {
   /** Строка подстрочного поиска по Названию/Описанию (1–256, Req 18.1). */
   text?: string;
   filters?: TaskFilters;
+  sortBy?: TaskSortField;
+  sortDirection?: TaskSortDirection;
   page?: number;
   pageSize?: number;
 }
@@ -155,34 +176,36 @@ export interface DirectoryUser {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 function isTaskStatus(value: unknown): value is TaskStatus {
-  return typeof value === 'string' && TASK_STATUSES.includes(value as TaskStatus);
+  return (
+    typeof value === "string" && TASK_STATUSES.includes(value as TaskStatus)
+  );
 }
 
 function isValidDate(value: unknown): value is string {
-  return typeof value === 'string' && !Number.isNaN(new Date(value).getTime());
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
 }
 
 function requireTaskDetail(value: unknown): TaskDetail {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
-    typeof value.title !== 'string' ||
-    !(typeof value.description === 'string' || value.description === null) ||
+    typeof value.id !== "string" ||
+    typeof value.title !== "string" ||
+    !(typeof value.description === "string" || value.description === null) ||
     !isValidDate(value.deadline) ||
     !isTaskStatus(value.status) ||
-    typeof value.messageCount !== 'number' ||
-    typeof value.hasUnread !== 'boolean' ||
-    typeof value.isOverdue !== 'boolean' ||
+    typeof value.messageCount !== "number" ||
+    typeof value.hasUnread !== "boolean" ||
+    typeof value.isOverdue !== "boolean" ||
     !Array.isArray(value.executorIds) ||
-    !value.executorIds.every((id) => typeof id === 'string') ||
+    !value.executorIds.every((id) => typeof id === "string") ||
     !Array.isArray(value.managerIds) ||
-    !value.managerIds.every((id) => typeof id === 'string')
+    !value.managerIds.every((id) => typeof id === "string")
   ) {
-    throw new TypeError('Некорректный ответ API: ожидалась полная задача');
+    throw new TypeError("Некорректный ответ API: ожидалась полная задача");
   }
 
   return value as unknown as TaskDetail;
@@ -191,16 +214,20 @@ function requireTaskDetail(value: unknown): TaskDetail {
 function requireTaskCard(value: unknown): TaskCard {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
-    typeof value.title !== 'string' ||
-    !(typeof value.description === 'string' || value.description === null) ||
+    typeof value.id !== "string" ||
+    typeof value.title !== "string" ||
+    !(typeof value.description === "string" || value.description === null) ||
     !isValidDate(value.deadline) ||
     !isTaskStatus(value.status) ||
-    typeof value.messageCount !== 'number' ||
-    typeof value.hasUnread !== 'boolean' ||
-    typeof value.isOverdue !== 'boolean'
+    typeof value.messageCount !== "number" ||
+    typeof value.hasUnread !== "boolean" ||
+    typeof value.isOverdue !== "boolean" ||
+    !Array.isArray(value.executorIds) ||
+    !value.executorIds.every((id) => typeof id === "string") ||
+    !Array.isArray(value.managerIds) ||
+    !value.managerIds.every((id) => typeof id === "string")
   ) {
-    throw new TypeError('Некорректный ответ API: ожидалась карточка задачи');
+    throw new TypeError("Некорректный ответ API: ожидалась карточка задачи");
   }
   return value as unknown as TaskCard;
 }
@@ -211,13 +238,13 @@ function requireTaskPage(value: unknown): Page<TaskCard> {
     !isRecord(value) ||
     !Array.isArray(value.items) ||
     meta === null ||
-    !['page', 'pageSize', 'total', 'totalPages'].every(
-      (field) => typeof meta[field] === 'number',
+    !["page", "pageSize", "total", "totalPages"].every(
+      (field) => typeof meta[field] === "number",
     ) ||
-    typeof meta.hasNext !== 'boolean' ||
-    typeof meta.hasPrevious !== 'boolean'
+    typeof meta.hasNext !== "boolean" ||
+    typeof meta.hasPrevious !== "boolean"
   ) {
-    throw new TypeError('Некорректный ответ API: ожидалась страница задач');
+    throw new TypeError("Некорректный ответ API: ожидалась страница задач");
   }
   return {
     items: value.items.map(requireTaskCard),
@@ -231,12 +258,14 @@ function requireDirectory(value: unknown): DirectoryUser[] {
     !value.every(
       (item) =>
         isRecord(item) &&
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        ['ADMIN', 'MANAGER', 'EXECUTOR'].includes(String(item.role)),
+        typeof item.id === "string" &&
+        typeof item.name === "string" &&
+        ["ADMIN", "MANAGER", "EXECUTOR"].includes(String(item.role)),
     )
   ) {
-    throw new TypeError('Некорректный ответ API: ожидался справочник пользователей');
+    throw new TypeError(
+      "Некорректный ответ API: ожидался справочник пользователей",
+    );
   }
   return value as DirectoryUser[];
 }
@@ -251,8 +280,10 @@ function toParams(query: TaskQuery): Record<string, unknown> {
   const params: Record<string, unknown> = {
     page: query.page ?? PAGINATION.defaultPage,
     pageSize: query.pageSize ?? PAGINATION.defaultPageSize,
+    sortBy: query.sortBy ?? DEFAULT_TASK_SORT.field,
+    sortDirection: query.sortDirection ?? DEFAULT_TASK_SORT.direction,
   };
-  if (query.text !== undefined && query.text !== '') {
+  if (query.text !== undefined && query.text !== "") {
     params.text = query.text;
   }
   const f = query.filters;
@@ -269,6 +300,9 @@ function toParams(query: TaskQuery): Record<string, unknown> {
     if (f.participantIds !== undefined && f.participantIds.length > 0) {
       params.participantIds = f.participantIds;
     }
+    if (f.assignmentKind !== undefined) {
+      params.assignmentKind = f.assignmentKind;
+    }
   }
   return params;
 }
@@ -278,8 +312,10 @@ function toParams(query: TaskQuery): Record<string, unknown> {
  * пагинации (Req 2.8–2.10, 18). Видимость определяется backend по роли и
  * назначениям; клиент лишь передаёт параметры запроса.
  */
-export async function listTasks(query: TaskQuery = {}): Promise<Page<TaskCard>> {
-  return requireTaskPage(await api.get<unknown>('/tasks', toParams(query)));
+export async function listTasks(
+  query: TaskQuery = {},
+): Promise<Page<TaskCard>> {
+  return requireTaskPage(await api.get<unknown>("/tasks", toParams(query)));
 }
 
 /** Детальная Задача (Req 2.12). Backend отклоняет доступ к чужой Задаче. */
@@ -289,11 +325,14 @@ export async function getTask(taskId: string): Promise<TaskDetail> {
 
 /** Создание Задачи Менеджером (Req 9.1–9.5). */
 export async function createTask(dto: CreateTaskDto): Promise<TaskDetail> {
-  return requireTaskDetail(await api.post<unknown>('/tasks', dto));
+  return requireTaskDetail(await api.post<unknown>("/tasks", dto));
 }
 
 /** Изменение параметров Задачи без смены Статуса (Req 10.12, 10.13). */
-export async function updateTask(taskId: string, patch: UpdateTaskDto): Promise<TaskDetail> {
+export async function updateTask(
+  taskId: string,
+  patch: UpdateTaskDto,
+): Promise<TaskDetail> {
   return requireTaskDetail(await api.patch<unknown>(`/tasks/${taskId}`, patch));
 }
 
@@ -302,7 +341,9 @@ export async function assignTask(
   taskId: string,
   assignment: AssignmentDto,
 ): Promise<TaskDetail> {
-  return requireTaskDetail(await api.post<unknown>(`/tasks/${taskId}/assign`, assignment));
+  return requireTaskDetail(
+    await api.post<unknown>(`/tasks/${taskId}/assign`, assignment),
+  );
 }
 
 /**
@@ -313,5 +354,5 @@ export async function assignTask(
  * ручной ввод идентификаторов.
  */
 export async function listDirectory(): Promise<DirectoryUser[]> {
-  return requireDirectory(await api.get<unknown>('/users/directory'));
+  return requireDirectory(await api.get<unknown>("/users/directory"));
 }

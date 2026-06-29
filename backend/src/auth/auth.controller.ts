@@ -1,12 +1,29 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
-import { AuthenticationException, EntityNotFoundException } from '../common/errors';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import { AppConfigService } from '../config';
+import {
+  AuthenticationException,
+  EntityNotFoundException,
+  ValidationException,
+} from '../common/errors';
+import { redirectResponse, type HttpResponseLike } from '../common/http';
 import { UserRepository } from '../repositories';
 import { RateLimit, RateLimitGuard } from '../security';
 import { CurrentUserView, toCurrentUser } from '../users/user-representation';
 import { AuthService } from './auth.service';
 import { AuthSession } from './auth.types';
 import { SessionAuthGuard, AuthenticatedRequest } from './session-auth.guard';
+import { clearSessionCookie, setSessionCookie } from './session-cookie';
 import { LoginDto, MaxLoginDto, SetPasswordDto, ChangePasswordDto } from './dto';
 
 /** Ответ успешной аутентификации: токен Сессии и профиль (контракт `auth-api.ts`). */
@@ -16,6 +33,14 @@ interface AuthSessionResponse {
   /** Профиль аутентифицированного Пользователя. */
   user: CurrentUserView;
 }
+
+interface MaxOAuthStartQuery {
+  redirect_uri?: string;
+  state?: string;
+  purpose?: string;
+}
+
+const MAX_OAUTH_CALLBACK_PATHS = new Set(['/auth/max/callback', '/profile/max/callback']);
 
 /**
  * HTTP-слой аутентификации и профиля текущей Сессии (Req 5, 6.1, 6.7, 16.1,
@@ -34,6 +59,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userRepository: UserRepository,
+    private readonly config: AppConfigService,
   ) {}
 
   /**
@@ -46,8 +72,17 @@ export class AuthController {
   @Post('login')
   @UseGuards(RateLimitGuard)
   @RateLimit('login')
-  async login(@Body() dto: LoginDto, @Req() req: Request): Promise<AuthSessionResponse> {
-    const session = await this.authService.login(dto.email, dto.password, req.ip ?? '');
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<AuthSessionResponse> {
+    const session = await this.authService.login(
+      dto.email,
+      dto.password,
+      req.ip ?? req.socket?.remoteAddress ?? '',
+    );
+    setSessionCookie(res, session, this.config);
     return this.toSessionResponse(session);
   }
 
@@ -61,9 +96,33 @@ export class AuthController {
   @Post('max')
   @UseGuards(RateLimitGuard)
   @RateLimit('login')
-  async max(@Body() dto: MaxLoginDto): Promise<AuthSessionResponse> {
-    const session = await this.authService.loginWithMax(dto.authCode);
+  async max(
+    @Body() dto: MaxLoginDto,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<AuthSessionResponse> {
+    const session = await this.authService.loginWithMax(dto.authCode, dto.redirectUri);
+    setSessionCookie(res, session, this.config);
     return this.toSessionResponse(session);
+  }
+
+  /**
+   * Серверный инициатор OAuth MAX. Используется frontend fallback-ом, когда
+   * build-time переменные Vite для MAX не заданы: браузер открывает
+   * `/api/auth/max/start`, а backend строит redirect на страницу авторизации из
+   * серверной конфигурации.
+   */
+  @Get('max/start')
+  @UseGuards(RateLimitGuard)
+  @RateLimit('login')
+  startMax(@Query() query: MaxOAuthStartQuery, @Res() res: HttpResponseLike): void {
+    const redirectUri = this.resolveMaxRedirectUri(query);
+    const authorizationUrl = this.buildMaxAuthorizationUrl(redirectUri, query.state);
+    redirectResponse(
+      res,
+      302,
+      authorizationUrl ??
+        this.buildMaxErrorRedirect(redirectUri, query.state, 'oauth_not_configured'),
+    );
   }
 
   /**
@@ -116,8 +175,12 @@ export class AuthController {
   @Post('logout')
   @UseGuards(SessionAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  async logout(@Req() req: AuthenticatedRequest): Promise<void> {
+  async logout(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<void> {
     await this.authService.revokeAllSessions(this.principal(req).userId);
+    clearSessionCookie(res, this.config);
   }
 
   /**
@@ -133,8 +196,12 @@ export class AuthController {
    */
   @Post('refresh')
   @UseGuards(SessionAuthGuard)
-  async refresh(@Req() req: AuthenticatedRequest): Promise<AuthSessionResponse> {
+  async refresh(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<AuthSessionResponse> {
     const session = await this.authService.refreshSession(this.principal(req));
+    setSessionCookie(res, session, this.config);
     return this.toSessionResponse(session);
   }
 
@@ -147,6 +214,73 @@ export class AuthController {
       token: session.accessToken,
       user: await this.loadCurrentUser(session.userId),
     };
+  }
+
+  private buildMaxAuthorizationUrl(redirectUri: string, state: string | undefined): string | null {
+    const { oauthAuthorizeUrl, oauthClientId } = this.config.max;
+    if (oauthAuthorizeUrl === '' || oauthClientId === '') {
+      return null;
+    }
+
+    let authorizeUrl: URL;
+    try {
+      authorizeUrl = new URL(oauthAuthorizeUrl);
+    } catch {
+      return null;
+    }
+
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('client_id', oauthClientId);
+    authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+    const normalizedState = typeof state === 'string' ? state.trim() : '';
+    if (normalizedState !== '') {
+      authorizeUrl.searchParams.set('state', normalizedState);
+    }
+    return authorizeUrl.toString();
+  }
+
+  private buildMaxErrorRedirect(
+    redirectUri: string,
+    state: string | undefined,
+    error: string,
+  ): string {
+    const url = new URL(redirectUri);
+    url.searchParams.set('error', error);
+    const normalizedState = typeof state === 'string' ? state.trim() : '';
+    if (normalizedState !== '') {
+      url.searchParams.set('state', normalizedState);
+    }
+    return url.toString();
+  }
+
+  private resolveMaxRedirectUri(query: MaxOAuthStartQuery): string {
+    let publicUrl: URL;
+    try {
+      publicUrl = new URL(this.config.app.publicUrl);
+    } catch {
+      throw new ValidationException('PUBLIC_URL должен быть корректным URL для OAuth MAX.');
+    }
+
+    const fallbackPath = query.purpose === 'link' ? '/profile/max/callback' : '/auth/max/callback';
+    const rawRedirectUri =
+      typeof query.redirect_uri === 'string' && query.redirect_uri.trim() !== ''
+        ? query.redirect_uri
+        : new URL(fallbackPath, publicUrl).toString();
+
+    let redirectUri: URL;
+    try {
+      redirectUri = new URL(rawRedirectUri);
+    } catch {
+      throw new ValidationException('redirect_uri OAuth MAX должен быть корректным URL.');
+    }
+
+    if (
+      redirectUri.origin !== publicUrl.origin ||
+      !MAX_OAUTH_CALLBACK_PATHS.has(redirectUri.pathname)
+    ) {
+      throw new ValidationException('redirect_uri OAuth MAX не разрешён для этого приложения.');
+    }
+    return redirectUri.toString();
   }
 
   /**

@@ -4,7 +4,7 @@ import { ChatModule } from '../chat';
 import { SecurityModule } from '../security';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
-import { SpreadsheetPreviewService } from './spreadsheet-preview.service';
+import { DocumentPreviewService } from './document-preview.service';
 import { PassthroughThumbnailGenerator, THUMBNAIL_GENERATOR } from './thumbnail-generator';
 
 /**
@@ -41,7 +41,7 @@ import { PassthroughThumbnailGenerator, THUMBNAIL_GENERATOR } from './thumbnail-
   controllers: [AttachmentsController],
   providers: [
     AttachmentsService,
-    SpreadsheetPreviewService,
+    DocumentPreviewService,
     { provide: THUMBNAIL_GENERATOR, useClass: PassthroughThumbnailGenerator },
   ],
   exports: [AttachmentsService],

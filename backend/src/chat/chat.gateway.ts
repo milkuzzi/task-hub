@@ -11,9 +11,14 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
-import { AuthPrincipal, SessionTokenService, SocketSessionDisconnector } from '../auth';
+import {
+  AuthPrincipal,
+  readSessionCookie,
+  SessionTokenService,
+  SocketSessionDisconnector,
+} from '../auth';
 import { SiteNotificationDispatcher } from '../notifications';
-import { TasksService } from '../tasks';
+import { TaskRealtimeDispatcher, TaskRealtimeUpdate, TasksService } from '../tasks';
 import { ChatEvents } from './chat.events';
 import { personaRoom, taskRoom } from './chat.rooms';
 
@@ -71,6 +76,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     private readonly tasks: TasksService,
     private readonly disconnector: SocketSessionDisconnector,
     private readonly siteNotifications: SiteNotificationDispatcher,
+    private readonly taskRealtime: TaskRealtimeDispatcher,
   ) {}
 
   /**
@@ -84,6 +90,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   afterInit(server: Server): void {
     this.disconnector.bindServer(server);
     this.siteNotifications.bind((userId, payload) => this.notifyUser(userId, payload));
+    this.taskRealtime.bind((taskId, payload, recipientUserIds) =>
+      this.broadcastTaskUpdated(taskId, payload, recipientUserIds),
+    );
     this.logger.log('ChatGateway инициализирован; сервер Socket.IO зарегистрирован.');
   }
 
@@ -91,8 +100,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
    * Авторизует новое подключение по сессии и присоединяет сокет к персональной
    * комнате Пользователя (Req 5.7, 11.1, 19.10).
    *
-   * Токен извлекается из рукопожатия (`handshake.auth.token` или заголовка
-   * `Authorization: Bearer <token>`). При отсутствии или недействительности
+   * Токен извлекается из рукопожатия (`handshake.auth.token`, заголовка
+   * `Authorization: Bearer <token>` или cookie). При отсутствии или недействительности
    * токена сокет немедленно отключается без раскрытия причины — аннулированные
    * сессии перестают проходить проверку сразу же (Req 19.10).
    */
@@ -186,6 +195,24 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   /**
+   * Рассылает лёгкое событие изменения Задачи в её комнату и персональные
+   * комнаты затронутых Пользователей. Клиент по событию перечитывает Задачу или
+   * текущую страницу списка через REST, чтобы получить представление с учётом
+   * своих прав и `hasUnread`.
+   */
+  broadcastTaskUpdated(
+    taskId: string,
+    payload: TaskRealtimeUpdate,
+    recipientUserIds: readonly string[] = [],
+  ): void {
+    const rooms = [
+      taskRoom(taskId),
+      ...[...new Set(recipientUserIds)].map((userId) => personaRoom(userId)),
+    ];
+    this.server.to(rooms).emit(ChatEvents.TaskUpdated, payload);
+  }
+
+  /**
    * Рассылает обновлённое значение счётчика Сообщений в комнату Задачи
    * (Req 9.7).
    */
@@ -213,8 +240,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   /**
    * Извлекает access-токен из рукопожатия Socket.IO.
    *
-   * Поддерживаются два источника: поле `auth.token` (рекомендуемый способ
-   * клиента Socket.IO) и заголовок `Authorization: Bearer <token>`.
+   * Поддерживаются legacy поле `auth.token`, legacy заголовок
+   * `Authorization: Bearer <token>` и HttpOnly cookie `taskhub_session`.
+   * Явные токены mini-app имеют приоритет над cookie браузера.
    *
    * @returns Токен либо `null`, если он отсутствует.
    */
@@ -231,7 +259,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         return value.trim();
       }
     }
-    return null;
+
+    return readSessionCookie(client.handshake.headers.cookie);
   }
 
   /** Отклоняет подключение: уведомляет клиента и немедленно разрывает сокет. */

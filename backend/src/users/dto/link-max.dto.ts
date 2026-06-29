@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
 
 /**
  * DTO привязки собственного профиля MAX по коду авторизации OAuth
@@ -17,4 +17,10 @@ export class LinkMaxDto {
   @IsString({ message: 'Код авторизации MAX должен быть строкой.' })
   @IsNotEmpty({ message: 'Не указан код авторизации MAX.' })
   authCode!: string;
+
+  /** Redirect URI, использованный при получении кода авторизации. */
+  @IsOptional()
+  @IsString({ message: 'Redirect URI MAX должен быть строкой.' })
+  @IsUrl({ require_protocol: true }, { message: 'Redirect URI MAX должен быть абсолютным URL.' })
+  redirectUri?: string;
 }

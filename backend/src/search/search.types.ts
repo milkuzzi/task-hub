@@ -1,4 +1,18 @@
-import { TaskStatus } from '@prisma/client';
+import { AssignmentKind, TaskStatus } from '@prisma/client';
+
+/** Поля, доступные для сортировки списка задач. */
+export const TASK_SORT_FIELDS = ['deadline', 'status', 'title'] as const;
+export type TaskSortField = (typeof TASK_SORT_FIELDS)[number];
+
+/** Направления сортировки списка задач. */
+export const TASK_SORT_DIRECTIONS = ['asc', 'desc'] as const;
+export type TaskSortDirection = (typeof TASK_SORT_DIRECTIONS)[number];
+
+/** Сортировка по умолчанию: сначала задачи с ближайшим дедлайном. */
+export const DEFAULT_TASK_SORT = {
+  field: 'deadline',
+  direction: 'asc',
+} as const satisfies { field: TaskSortField; direction: TaskSortDirection };
 
 /**
  * Типы поиска, фильтрации и пагинации Задач (Req 18).
@@ -39,6 +53,8 @@ export interface TaskFilters {
   deadlineTo?: Date;
   /** Фильтр по участникам: в Задаче назначен хотя бы один из Пользователей. */
   participantIds?: string[];
+  /** Фильтр по виду назначения текущего Пользователя в Задаче. */
+  assignmentKind?: AssignmentKind;
 }
 
 /**
@@ -52,6 +68,8 @@ export interface TaskFilters {
 export interface SearchQuery {
   text?: string;
   filters?: TaskFilters;
+  sortBy?: TaskSortField;
+  sortDirection?: TaskSortDirection;
   page?: number;
   pageSize?: number;
 }
@@ -68,6 +86,7 @@ export interface NormalizedTaskFilters {
   deadlineFrom?: Date;
   deadlineTo?: Date;
   participantIds?: string[];
+  assignmentKind?: AssignmentKind;
 }
 
 /**
@@ -80,4 +99,6 @@ export interface NormalizedTaskFilters {
 export interface NormalizedSearchQuery {
   text?: string;
   filters?: NormalizedTaskFilters;
+  sortBy: TaskSortField;
+  sortDirection: TaskSortDirection;
 }

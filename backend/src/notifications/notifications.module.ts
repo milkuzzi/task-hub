@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth';
+import { MaxBotHttpApiAdapter } from '../max/bot/max-bot-http.adapter';
 import { TASK_NOTIFIER } from '../tasks/ports';
 import { NotificationRepository } from './notification.repository';
 import { NotificationsService } from './notifications.service';
@@ -7,7 +8,7 @@ import { NotificationsController } from './notifications.controller';
 import { ChatNotificationRouter } from './chat-notification-router';
 import { TaskNotificationRouter } from './task-notification-router';
 import { TaskNotifierAdapter } from './task-notifier.adapter';
-import { MAX_DELIVERY_PORT, UnavailableMaxDeliveryAdapter } from './delivery/max-delivery.port';
+import { MAX_DELIVERY_PORT } from './delivery/max-delivery.port';
 import { MaxDeliveryFilter } from './delivery/max-delivery-filter';
 import { NotificationDeliveryService } from './delivery/notification-delivery.service';
 import { NotificationDeliveryWorker } from './delivery/notification-delivery.worker';
@@ -43,9 +44,8 @@ import { DeadlineReminderWorker } from './deadline-reminder.worker';
  * реализована воркером {@link NotificationDeliveryWorker} поверх
  * {@link NotificationDeliveryService}: доставка на сайт через
  * {@link SiteNotificationDispatcher} фиксируется независимо от MAX (Req 14.6,
- * 15.7); доставка в MAX абстрагирована портом {@link MAX_DELIVERY_PORT} (по
- * умолчанию — безопасная заглушка {@link UnavailableMaxDeliveryAdapter} до
- * задачи 13.x) и выполняется с ограничением попыток (≤3) и интервалами 5 мин /
+ * 15.7); доставка в MAX абстрагирована портом {@link MAX_DELIVERY_PORT} и
+ * выполняется HTTP-адаптером Bot API MAX с ограничением попыток (≤3) и интервалами 5 мин /
  * 5 с / 30 с (Req 13.13, 14.6, 15.7). {@link SiteNotificationDispatcher}
  * экспортируется, чтобы ChatGateway зарегистрировал в нём realtime-доставку без
  * циклической зависимости модулей.
@@ -63,8 +63,8 @@ import { DeadlineReminderWorker } from './deadline-reminder.worker';
     TaskNotifierAdapter,
     { provide: TASK_NOTIFIER, useExisting: TaskNotifierAdapter },
     SiteNotificationDispatcher,
-    UnavailableMaxDeliveryAdapter,
-    { provide: MAX_DELIVERY_PORT, useExisting: UnavailableMaxDeliveryAdapter },
+    MaxBotHttpApiAdapter,
+    { provide: MAX_DELIVERY_PORT, useExisting: MaxBotHttpApiAdapter },
     MaxDeliveryFilter,
     NotificationDeliveryService,
     NotificationDeliveryWorker,

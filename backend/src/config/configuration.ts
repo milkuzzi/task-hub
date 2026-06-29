@@ -60,9 +60,13 @@ export function configuration(): AppConfiguration {
     max: {
       oauthClientId: str(env.MAX_OAUTH_CLIENT_ID, ''),
       oauthClientSecret: str(env.MAX_OAUTH_CLIENT_SECRET, ''),
+      oauthAuthorizeUrl: str(env.MAX_OAUTH_AUTHORIZE_URL, ''),
       oauthRedirectUri: str(env.MAX_OAUTH_REDIRECT_URI, 'https://localhost/auth/max/callback'),
+      botUsername: str(env.MAX_BOT_USERNAME, ''),
       botToken: str(env.MAX_BOT_TOKEN, ''),
-      botApiBaseUrl: str(env.MAX_BOT_API_BASE_URL, 'https://botapi.max.ru'),
+      botWebhookSecret: str(env.MAX_BOT_WEBHOOK_SECRET, str(env.MAX_BOT_TOKEN, '')),
+      botApiBaseUrl: str(env.MAX_BOT_API_BASE_URL, 'https://platform-api2.max.ru'),
+      miniAppInitDataTtlSeconds: int(env.MAX_MINI_APP_INIT_DATA_TTL_SECONDS, 300),
     },
     restic: {
       repository: str(env.RESTIC_REPOSITORY, ''),

@@ -1,6 +1,6 @@
-import { useTranslation } from 'react-i18next';
-import { fetchAvatarBlob } from '@/lib/avatar';
-import { useAuthedImage } from '@/lib/use-authed-image';
+import { useTranslation } from "react-i18next";
+import { fetchAvatarBlob } from "@/lib/avatar";
+import { useAuthedImage } from "@/lib/use-authed-image";
 
 /**
  * Переиспользуемый аватар Пользователя (дефект 4, Req 2.4).
@@ -22,8 +22,10 @@ export interface UserAvatarProps {
   userId: string | null | undefined;
   /** `false`, когда API уже сообщил, что аватара нет; `undefined` — проверить сервером. */
   hasAvatar?: boolean | undefined;
+  /** Относительный путь аватара; меняется после загрузки и принудительно обновляет preview. */
+  avatarPath?: string | null | undefined;
   /** Размер аватара (визуальный класс). */
-  size?: 'sm' | 'md';
+  size?: "sm" | "md";
   /** Дополнительный CSS-класс. */
   className?: string;
 }
@@ -31,26 +33,34 @@ export interface UserAvatarProps {
 export function UserAvatar({
   userId,
   hasAvatar,
-  size = 'md',
+  avatarPath,
+  size = "md",
   className,
 }: UserAvatarProps): JSX.Element {
   const { t } = useTranslation();
 
   // Если наличие неизвестно, запрашиваем защищённый аватар; если API уже
   // вернул `avatarPath: null`, сразу показываем заглушку без сетевого 404.
-  const shouldFetch = userId != null && hasAvatar !== false;
+  const resolvedHasAvatar =
+    avatarPath === undefined ? hasAvatar : avatarPath !== null;
+  const shouldFetch = userId != null && resolvedHasAvatar !== false;
   const { src } = useAuthedImage(
     shouldFetch ? () => fetchAvatarBlob(userId) : null,
-    [userId, hasAvatar],
+    [userId, resolvedHasAvatar, avatarPath],
   );
 
-  const classes = ['user-avatar', `user-avatar--${size}`, className]
+  const classes = ["user-avatar", `user-avatar--${size}`, className]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   if (src !== null) {
-    return <img className={classes} src={src} alt={t('profile.avatar.alt')} />;
+    return <img className={classes} src={src} alt={t("profile.avatar.alt")} />;
   }
 
-  return <span className={`${classes} user-avatar--placeholder`} aria-hidden="true" />;
+  return (
+    <span
+      className={`${classes} user-avatar--placeholder`}
+      aria-hidden="true"
+    />
+  );
 }

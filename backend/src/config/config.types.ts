@@ -52,9 +52,14 @@ export interface SendPulseConfig {
 export interface MaxConfig {
   oauthClientId: string;
   oauthClientSecret: string;
+  oauthAuthorizeUrl: string;
   oauthRedirectUri: string;
+  botUsername: string;
   botToken: string;
+  botWebhookSecret: string;
   botApiBaseUrl: string;
+  /** Максимальный возраст подписанных данных запуска mini-app. */
+  miniAppInitDataTtlSeconds: number;
 }
 
 /**

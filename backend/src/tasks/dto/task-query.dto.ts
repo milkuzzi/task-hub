@@ -1,8 +1,14 @@
 import { Transform, Type } from 'class-transformer';
 import { IsDate, IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
-import { TaskStatus } from '@prisma/client';
+import { AssignmentKind, TaskStatus } from '@prisma/client';
 import { PAGINATION } from '../../common/dto';
-import { SEARCH_TEXT_BOUNDS } from '../../search';
+import {
+  SEARCH_TEXT_BOUNDS,
+  TASK_SORT_DIRECTIONS,
+  TASK_SORT_FIELDS,
+  TaskSortDirection,
+  TaskSortField,
+} from '../../search';
 
 /**
  * Приводит значение query-параметра к массиву строк (Req 18.3).
@@ -83,4 +89,21 @@ export class TaskQueryDto {
   @Transform(({ value }) => toStringArray(value))
   @IsString({ each: true, message: 'Идентификатор участника должен быть строкой.' })
   participantIds?: string[];
+
+  /** Вид назначения текущего Пользователя в Задаче. */
+  @IsOptional()
+  @IsIn(Object.values(AssignmentKind), {
+    message: 'Недопустимая роль Пользователя в Задаче.',
+  })
+  assignmentKind?: AssignmentKind;
+
+  /** Поле сортировки списка Задач. */
+  @IsOptional()
+  @IsIn(TASK_SORT_FIELDS, { message: 'Недопустимое поле сортировки.' })
+  sortBy?: TaskSortField;
+
+  /** Направление сортировки списка Задач. */
+  @IsOptional()
+  @IsIn(TASK_SORT_DIRECTIONS, { message: 'Недопустимое направление сортировки.' })
+  sortDirection?: TaskSortDirection;
 }

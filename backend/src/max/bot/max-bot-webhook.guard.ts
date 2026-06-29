@@ -1,22 +1,22 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
-import { Request } from 'express';
 import { AuthenticationException } from '../../common/errors';
 import { AppConfigService } from '../../config';
 
 /** HTTP-заголовок с секретом webhook Бота MAX. */
-export const MAX_BOT_WEBHOOK_TOKEN_HEADER = 'x-max-bot-token';
+export const MAX_BOT_WEBHOOK_TOKEN_HEADER = 'x-max-bot-api-secret';
+const LEGACY_MAX_BOT_WEBHOOK_TOKEN_HEADER = 'x-max-bot-token';
 
 /**
  * Guard аутентификации входящих webhook-запросов Бота MAX (Req 16.4).
  *
  * Эндпоинты Бота MAX доступны извне, поэтому защищаются общим секретом: каждый
  * входящий запрос должен нести заголовок {@link MAX_BOT_WEBHOOK_TOKEN_HEADER},
- * совпадающий с токеном Бота из конфигурации (`max.botToken`). Запрос без
+ * совпадающий с секретом webhook из конфигурации (`max.botWebhookSecret`). Запрос без
  * корректного токена отклоняется {@link AuthenticationException} (401), что не
  * позволяет постороннему источнику инициировать команды Бота от имени
  * Пользователей.
  *
- * Если токен Бота в конфигурации не задан (пустая строка), Guard отклоняет все
+ * Если secret в конфигурации не задан (пустая строка), Guard отклоняет все
  * запросы — это безопасное поведение по умолчанию: webhook не принимает команды,
  * пока интеграция не сконфигурирована, вместо того чтобы оставаться открытым.
  */
@@ -25,9 +25,11 @@ export class MaxBotWebhookGuard implements CanActivate {
   constructor(private readonly config: AppConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<Request>();
-    const provided = request.headers[MAX_BOT_WEBHOOK_TOKEN_HEADER];
-    const expected = this.config.max.botToken;
+    const request = context.switchToHttp().getRequest<WebhookRequest>();
+    const provided =
+      request.headers[MAX_BOT_WEBHOOK_TOKEN_HEADER] ??
+      request.headers[LEGACY_MAX_BOT_WEBHOOK_TOKEN_HEADER];
+    const expected = this.config.max.botWebhookSecret;
 
     if (typeof expected !== 'string' || expected.length === 0) {
       throw new AuthenticationException('Webhook Бота MAX не сконфигурирован.');
@@ -52,4 +54,8 @@ export class MaxBotWebhookGuard implements CanActivate {
     }
     return diff === 0;
   }
+}
+
+interface WebhookRequest {
+  headers: Record<string, string | string[] | undefined>;
 }

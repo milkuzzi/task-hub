@@ -254,6 +254,7 @@ export class TaskNotificationRouter {
     threshold: ReminderThreshold,
     executorIds: readonly string[],
     managerIds: readonly string[],
+    taskTitle?: string,
   ): Promise<void> {
     const recipientIds = this.mergeRecipients(executorIds, managerIds);
     if (recipientIds.length === 0) {
@@ -267,7 +268,7 @@ export class TaskNotificationRouter {
       type,
       recipientIds,
       taskId,
-      payload: { threshold },
+      payload: this.withTaskTitle({ threshold }, taskTitle),
       // Стабильный ключ без момента времени: один порог одной Задачи —
       // одно событие (Req 13.1, защита от повторной отправки порога).
       eventKey: ['task-evt', 'deadline-reminder', taskId, threshold].join(':'),

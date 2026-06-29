@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { ArrowLeft, CalendarBlank } from '@phosphor-icons/react';
-import { useAuth } from '@/lib/use-auth';
-import { ApiError } from '@/lib/api';
-import { formatMsk } from '@/lib/time';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { ArrowLeft, CalendarBlank } from "@phosphor-icons/react";
+import { useAuth } from "@/lib/use-auth";
+import { useAppPath, useIsMaxApp } from "@/lib/app-path";
+import { ApiError } from "@/lib/api";
+import { formatMsk } from "@/lib/time";
 import {
   connectSocket,
   joinTaskRoom,
   leaveTaskRoom,
   ChatEvents,
-} from '@/lib/socket';
+  type TaskRealtimeUpdate,
+} from "@/lib/socket";
 import {
   assignTask,
   getTask,
@@ -20,7 +22,7 @@ import {
   type DirectoryUser,
   type TaskDetail,
   type TaskStatus,
-} from '@/lib/tasks-api';
+} from "@/lib/tasks-api";
 import {
   deleteMessage as apiDeleteMessage,
   editMessage as apiEditMessage,
@@ -35,18 +37,23 @@ import {
   type MessageReader,
   type MessageReadersUpdate,
   type TaskStatusUpdate,
-} from '@/lib/chat-api';
-import { listAuditEntries, type AuditLogEntry } from '@/lib/audit-api';
-import { resolveActor } from '@/lib/status-api';
-import { ChatPanel } from '@/components/ChatPanel';
-import { AttachmentsSection } from '@/components/AttachmentsSection';
-import { AttachmentViewer } from '@/components/AttachmentViewer';
-import { AuditLog } from '@/components/AuditLog';
-import { StatusActions } from '@/components/StatusActions';
-import { TaskFormDialog, type TaskFormValues } from '@/components/TaskFormDialog';
-import { LoadingState } from '@/components/LoadingState';
-import { ErrorState } from '@/components/ErrorState';
-import { resolveErrorMessage } from '@/lib/error-message';
+} from "@/lib/chat-api";
+import { listAuditEntries, type AuditLogEntry } from "@/lib/audit-api";
+import { resolveActor } from "@/lib/status-api";
+import { ChatPanel } from "@/components/ChatPanel";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { AttachmentViewer } from "@/components/AttachmentViewer";
+import { AuditLog } from "@/components/AuditLog";
+import { StatusActions } from "@/components/StatusActions";
+import { UserAvatar } from "@/components/UserAvatar";
+import {
+  TaskFormDialog,
+  type TaskFormValues,
+} from "@/components/TaskFormDialog";
+import { LoadingState } from "@/components/LoadingState";
+import { ErrorState } from "@/components/ErrorState";
+import { TaskMaxNotificationsButton } from "@/components/TaskMaxNotificationsButton";
+import { resolveErrorMessage } from "@/lib/error-message";
 
 /**
  * Экран Задачи: realtime-чат, раздел «Вложения» и Журнал изменений (задача 20.5).
@@ -65,23 +72,77 @@ import { resolveErrorMessage } from '@/lib/error-message';
  * не раскрывается (Req 2.12). Время отображается в MSK (Req 1.2).
  */
 
-type Tab = 'chat' | 'attachments' | 'audit';
+type Tab = "chat" | "attachments" | "audit";
+type ParticipantGroup = "executors" | "managers";
+
+interface TaskParticipant {
+  id: string;
+  name: string;
+}
 
 /** Сортировка Сообщений по моменту создания (старые → новые). */
 function byCreatedAt(a: ChatMessage, b: ChatMessage): number {
   return a.createdAt.localeCompare(b.createdAt);
 }
 
+function ParticipantAvatarRow({
+  label,
+  participants,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  participants: TaskParticipant[];
+  expanded: boolean;
+  onToggle: () => void;
+}): JSX.Element {
+  const visible = participants.slice(0, 6);
+  const hiddenCount = Math.max(0, participants.length - visible.length);
+  const names = participants.map((participant) => participant.name).join(", ");
+
+  return (
+    <button
+      className={
+        expanded ? "task-participants__row is-open" : "task-participants__row"
+      }
+      type="button"
+      aria-expanded={expanded}
+      title={names === "" ? label : `${label}: ${names}`}
+      onClick={onToggle}
+    >
+      <span className="task-participants__label">{label}</span>
+      <span className="task-participants__avatars" aria-hidden="true">
+        {visible.map((participant) => (
+          <UserAvatar
+            key={participant.id}
+            userId={participant.id}
+            size="sm"
+            className="task-participants__avatar"
+          />
+        ))}
+        {hiddenCount > 0 && (
+          <span className="task-participants__more">+{hiddenCount}</span>
+        )}
+      </span>
+      <span className="task-participants__count">{participants.length}</span>
+    </button>
+  );
+}
+
 export function TaskDetailPage(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { taskId = '' } = useParams<{ taskId: string }>();
+  const appPath = useAppPath();
+  const isMaxApp = useIsMaxApp();
+  const { taskId = "" } = useParams<{ taskId: string }>();
   const { user } = useAuth();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [directory, setDirectory] = useState<DirectoryUser[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [readers, setReaders] = useState<Record<string, MessageReader[] | undefined>>({});
+  const [readers, setReaders] = useState<
+    Record<string, MessageReader[] | undefined>
+  >({});
   // Реактивный счётчик прочитавших по messageId (Req 2.5, Property 9): обновляется
   // каждым событием `chat:reads` независимо от факта раскрытия полного списка.
   const [readCounts, setReadCounts] = useState<Record<string, number>>({});
@@ -89,16 +150,20 @@ export function TaskDetailPage(): JSX.Element {
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
   const [status, setStatus] = useState<TaskStatus | null>(null);
 
-  const [tab, setTab] = useState<Tab>('chat');
+  const [tab, setTab] = useState<Tab>("chat");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditForbidden, setAuditForbidden] = useState(false);
-  const [viewerAttachment, setViewerAttachment] = useState<AttachmentMeta | null>(null);
+  const [viewerAttachment, setViewerAttachment] =
+    useState<AttachmentMeta | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [expandedParticipants, setExpandedParticipants] =
+    useState<ParticipantGroup | null>(null);
 
   /** Уже отмеченные прочитанными Сообщения (защита от повторных вызовов). */
   const markedRef = useRef<Set<string>>(new Set());
@@ -108,7 +173,7 @@ export function TaskDetailPage(): JSX.Element {
     if (user === null) {
       return false;
     }
-    if (user.role === 'ADMIN') {
+    if (user.role === "ADMIN") {
       return true;
     }
     return task !== null && task.managerIds.includes(user.id);
@@ -124,6 +189,7 @@ export function TaskDetailPage(): JSX.Element {
     }
     return resolveActor(user.role, user.id, task);
   }, [user, task]);
+  const hasAdminReviewControls = status === "NEEDS_ADMIN" && actor === "ADMIN";
 
   /** Карта «идентификатор → отображаемое имя» из справочника Пользователей. */
   const nameById = useMemo(() => {
@@ -134,15 +200,45 @@ export function TaskDetailPage(): JSX.Element {
     return map;
   }, [directory]);
 
+  const executorParticipants = useMemo<TaskParticipant[]>(() => {
+    if (task === null) {
+      return [];
+    }
+    return task.executorIds.map((id) => ({ id, name: nameById.get(id) ?? id }));
+  }, [task, nameById]);
+
+  const managerParticipants = useMemo<TaskParticipant[]>(() => {
+    if (task === null) {
+      return [];
+    }
+    return task.managerIds.map((id) => ({ id, name: nameById.get(id) ?? id }));
+  }, [task, nameById]);
+
+  const expandedParticipantList =
+    expandedParticipants === "executors"
+      ? executorParticipants
+      : managerParticipants;
+  const expandedParticipantLabel =
+    expandedParticipants === "executors"
+      ? t("taskDetail.executors")
+      : t("taskDetail.managers");
+
   const resolveAuthor = useCallback(
     (authorId: string | null): string => {
       if (authorId === null) {
-        return t('audit.unknownAuthor');
+        return t("audit.unknownAuthor");
       }
       return nameById.get(authorId) ?? authorId;
     },
     [nameById, t],
   );
+
+  const refreshTask = useCallback(async (): Promise<void> => {
+    const detail = await getTask(taskId);
+    setTask(detail);
+    setStatus(detail.status);
+    setLoadError(null);
+  }, [taskId]);
 
   /** Вставляет или заменяет Сообщение по идентификатору, сохраняя порядок. */
   const upsertMessage = useCallback((incoming: ChatMessage): void => {
@@ -172,7 +268,11 @@ export function TaskDetailPage(): JSX.Element {
         return;
       }
       for (const m of items) {
-        if (m.deleted || m.authorId === currentUserId || markedRef.current.has(m.id)) {
+        if (
+          m.deleted ||
+          m.authorId === currentUserId ||
+          markedRef.current.has(m.id)
+        ) {
           continue;
         }
         markedRef.current.add(m.id);
@@ -186,7 +286,7 @@ export function TaskDetailPage(): JSX.Element {
 
   // Первичная загрузка Задачи, справочника, ленты Сообщений и Вложений.
   useEffect(() => {
-    if (taskId === '') {
+    if (taskId === "") {
       return;
     }
     let cancelled = false;
@@ -202,7 +302,10 @@ export function TaskDetailPage(): JSX.Element {
         setTask(detail);
         setStatus(detail.status);
 
-        const [msgs, atts] = await Promise.all([listMessages(taskId), listAttachments(taskId)]);
+        const [msgs, atts] = await Promise.all([
+          listMessages(taskId),
+          listAttachments(taskId),
+        ]);
         if (cancelled) {
           return;
         }
@@ -212,7 +315,7 @@ export function TaskDetailPage(): JSX.Element {
         markVisibleRead(sorted);
       } catch (err) {
         if (!cancelled) {
-          setLoadError(resolveErrorMessage(err, t, t('taskDetail.loadError')));
+          setLoadError(resolveErrorMessage(err, t, t("taskDetail.loadError")));
         }
       } finally {
         if (!cancelled) {
@@ -238,7 +341,7 @@ export function TaskDetailPage(): JSX.Element {
 
   // Realtime-подписка на события Чата комнаты Задачи (Req 11.3, 11.8, 10).
   useEffect(() => {
-    if (taskId === '') {
+    if (taskId === "") {
       return;
     }
     const socket = connectSocket();
@@ -257,7 +360,10 @@ export function TaskDetailPage(): JSX.Element {
       }
       // Обновляем реактивный счётчик при каждом событии независимо от того,
       // раскрыт ли полный список прочитавших (Req 2.5, Property 9).
-      setReadCounts((prev) => ({ ...prev, [payload.messageId]: payload.readers.length }));
+      setReadCounts((prev) => ({
+        ...prev,
+        [payload.messageId]: payload.readers.length,
+      }));
       setReaders((prev) => ({ ...prev, [payload.messageId]: payload.readers }));
     };
     const onStatus = (payload: TaskStatusUpdate): void => {
@@ -265,18 +371,29 @@ export function TaskDetailPage(): JSX.Element {
         setStatus(payload.status as TaskStatus);
       }
     };
+    const onTaskUpdated = (payload: TaskRealtimeUpdate): void => {
+      if (payload.taskId !== taskId) {
+        return;
+      }
+      void refreshTask().catch((err) => {
+        setTask(null);
+        setLoadError(resolveErrorMessage(err, t, t("taskDetail.loadError")));
+      });
+    };
 
     socket.on(ChatEvents.Message, onMessage);
     socket.on(ChatEvents.MessageReaders, onReaders);
     socket.on(ChatEvents.StatusUpdate, onStatus);
+    socket.on(ChatEvents.TaskUpdated, onTaskUpdated);
 
     return () => {
       socket.off(ChatEvents.Message, onMessage);
       socket.off(ChatEvents.MessageReaders, onReaders);
       socket.off(ChatEvents.StatusUpdate, onStatus);
+      socket.off(ChatEvents.TaskUpdated, onTaskUpdated);
       leaveTaskRoom(taskId);
     };
-  }, [taskId, upsertMessage, markVisibleRead]);
+  }, [taskId, upsertMessage, markVisibleRead, refreshTask, t]);
 
   /** Перезагружает раздел «Вложения» (после отправки Сообщения с файлами). */
   const reloadAttachments = useCallback(async (): Promise<void> => {
@@ -306,17 +423,37 @@ export function TaskDetailPage(): JSX.Element {
   }, [taskId]);
 
   useEffect(() => {
-    if (tab === 'audit' && isModerator) {
+    if (tab === "audit" && isModerator) {
       void loadAudit();
     }
   }, [tab, isModerator, loadAudit]);
+
+  useEffect(() => {
+    if (toastMessage === null) {
+      return;
+    }
+    const timer = window.setTimeout(() => setToastMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
 
   // Обработчики Чата.
   const handleSend = useCallback(
     async (text: string, files: File[]): Promise<void> => {
       // Сначала загружаем Вложения и получаем их идентификаторы (Req 12.1–12.5),
       // затем отправляем Сообщение с привязкой (Req 11.3).
-      const uploaded = await Promise.all(files.map((f) => uploadAttachment(taskId, f)));
+      const uploaded: AttachmentMeta[] = [];
+      for (const file of files) {
+        try {
+          uploaded.push(await uploadAttachment(taskId, file));
+        } catch (err) {
+          const message = resolveErrorMessage(
+            err,
+            t,
+            t("chat.errors.uploadFailed"),
+          );
+          throw new Error(`${file.name}: ${message}`);
+        }
+      }
       const attachmentIds = uploaded.map((a) => a.id);
       const created = await apiSendMessage(taskId, text, attachmentIds);
       upsertMessage(created);
@@ -324,7 +461,7 @@ export function TaskDetailPage(): JSX.Element {
         await reloadAttachments();
       }
     },
-    [taskId, upsertMessage, reloadAttachments],
+    [taskId, t, upsertMessage, reloadAttachments],
   );
 
   const handleEdit = useCallback(
@@ -335,15 +472,12 @@ export function TaskDetailPage(): JSX.Element {
     [upsertMessage],
   );
 
-  const handleDelete = useCallback(
-    async (messageId: string): Promise<void> => {
-      await apiDeleteMessage(messageId);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === messageId ? { ...m, deleted: true } : m)),
-      );
-    },
-    [],
-  );
+  const handleDelete = useCallback(async (messageId: string): Promise<void> => {
+    await apiDeleteMessage(messageId);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, deleted: true } : m)),
+    );
+  }, []);
 
   const handleLoadReaders = useCallback((messageId: string): void => {
     void listReaders(messageId)
@@ -390,53 +524,64 @@ export function TaskDetailPage(): JSX.Element {
       setTask(refreshed);
       setStatus(refreshed.status);
       closeEditForm();
+      setToastMessage(t("task.toast.parametersUpdated"));
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : t('errors.generic'));
+      setFormError(err instanceof ApiError ? err.message : t("errors.generic"));
     } finally {
       setFormBusy(false);
     }
   }
 
   if (loading) {
-    return <LoadingState label={t('common.loading')} />;
+    return <LoadingState label={t("common.loading")} />;
   }
 
   if (loadError !== null || task === null) {
     return (
       <section className="stack page-section">
-        <button className="btn btn--sm btn--ghost back-button" type="button" onClick={() => navigate('/tasks')}>
+        <button
+          className="btn btn--sm btn--ghost back-button"
+          type="button"
+          onClick={() => navigate(appPath("/tasks"))}
+        >
           <ArrowLeft size={16} aria-hidden="true" />
-          {t('taskDetail.back')}
+          {t("taskDetail.back")}
         </button>
-        <ErrorState message={loadError ?? t('taskDetail.loadError')} />
+        <ErrorState message={loadError ?? t("taskDetail.loadError")} />
       </section>
     );
   }
 
   return (
     <section className="stack page-section">
-      <button className="btn btn--sm btn--ghost back-button" type="button" onClick={() => navigate('/tasks')}>
+      <button
+        className="btn btn--sm btn--ghost back-button"
+        type="button"
+        onClick={() => navigate(appPath("/tasks"))}
+      >
         <ArrowLeft size={16} aria-hidden="true" />
-        {t('taskDetail.back')}
+        {t("taskDetail.back")}
       </button>
 
       <article className="panel panel--compact task-hero">
         <div className="task-hero__main">
           <h1>{task.title}</h1>
-          {task.description !== null && task.description !== '' && (
+          {task.description !== null && task.description !== "" && (
             <p className="task-hero__description">{task.description}</p>
           )}
         </div>
         <div className="task-hero__side">
           <div className="task-hero__meta">
             {status !== null && (
-              <span className={`status-badge status-badge--${status.toLowerCase()}`}>
+              <span
+                className={`status-badge status-badge--${status.toLowerCase()}`}
+              >
                 {t(TASK_STATUS_LABEL_KEYS[status])}
               </span>
             )}
             {task.isOverdue && (
               <span className="status-badge status-badge--overdue">
-                {t('task.card.overdue')}
+                {t("task.card.overdue")}
               </span>
             )}
             <p className="task-hero__deadline">
@@ -445,7 +590,13 @@ export function TaskDetailPage(): JSX.Element {
             </p>
           </div>
           {(status !== null || isModerator) && (
-            <div className="task-hero__action-row">
+            <div
+              className={
+                hasAdminReviewControls
+                  ? "task-hero__action-row task-hero__action-row--admin-review"
+                  : "task-hero__action-row"
+              }
+            >
               {status !== null && (
                 <StatusActions
                   taskId={taskId}
@@ -455,52 +606,104 @@ export function TaskDetailPage(): JSX.Element {
                 />
               )}
               {isModerator && (
-                <button className="btn btn--sm task-hero__edit" type="button" onClick={openEditForm}>
-                  {t('task.card.edit')}
+                <button
+                  className="btn btn--sm task-hero__edit"
+                  type="button"
+                  onClick={openEditForm}
+                >
+                  {t("task.card.edit")}
                 </button>
+              )}
+              {isMaxApp && user?.maxLinked === true && (
+                <TaskMaxNotificationsButton taskId={taskId} />
               )}
             </div>
           )}
+          <div
+            className="task-participants"
+            aria-label={t("taskDetail.participants")}
+          >
+            <div className="task-participants__rows">
+              <ParticipantAvatarRow
+                label={t("taskDetail.executors")}
+                participants={executorParticipants}
+                expanded={expandedParticipants === "executors"}
+                onToggle={() =>
+                  setExpandedParticipants((current) =>
+                    current === "executors" ? null : "executors",
+                  )
+                }
+              />
+              <ParticipantAvatarRow
+                label={t("taskDetail.managers")}
+                participants={managerParticipants}
+                expanded={expandedParticipants === "managers"}
+                onToggle={() =>
+                  setExpandedParticipants((current) =>
+                    current === "managers" ? null : "managers",
+                  )
+                }
+              />
+            </div>
+            {expandedParticipants !== null && (
+              <div className="task-participants__panel">
+                <strong>{expandedParticipantLabel}</strong>
+                <ul className="task-participants__list">
+                  {expandedParticipantList.map((participant) => (
+                    <li
+                      key={participant.id}
+                      className="task-participants__item"
+                    >
+                      <UserAvatar userId={participant.id} size="sm" />
+                      <span>{participant.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       </article>
 
       <div className="task-activity stack">
         <div className="tabs" role="tablist">
           <button
-            className={tab === 'chat' ? 'tab is-active' : 'tab'}
+            className={tab === "chat" ? "tab is-active" : "tab"}
             role="tab"
-            aria-selected={tab === 'chat'}
+            aria-selected={tab === "chat"}
             type="button"
-            onClick={() => setTab('chat')}
+            onClick={() => setTab("chat")}
           >
-            {t('chat.tabs.chat')}
+            {t("chat.tabs.chat")}
           </button>
           <button
-            className={tab === 'attachments' ? 'tab is-active' : 'tab'}
+            className={tab === "attachments" ? "tab is-active" : "tab"}
             role="tab"
-            aria-selected={tab === 'attachments'}
+            aria-selected={tab === "attachments"}
             type="button"
-            onClick={() => setTab('attachments')}
+            onClick={() => setTab("attachments")}
           >
-            {t('chat.tabs.attachments')}
+            {t("chat.tabs.attachments")}
           </button>
           {isModerator && (
             <button
-              className={tab === 'audit' ? 'tab is-active' : 'tab'}
+              className={tab === "audit" ? "tab is-active" : "tab"}
               role="tab"
-              aria-selected={tab === 'audit'}
+              aria-selected={tab === "audit"}
               type="button"
-              onClick={() => setTab('audit')}
+              onClick={() => setTab("audit")}
             >
-              {t('chat.tabs.audit')}
+              {t("chat.tabs.audit")}
             </button>
           )}
         </div>
 
-        {tab === 'chat' && user !== null && (
+        {tab === "chat" && user !== null && (
           <ChatPanel
+            surface={isMaxApp ? "max" : "site"}
             messages={messages}
             currentUserId={user.id}
+            currentUserRole={user.role}
             isModerator={isModerator}
             readers={readers}
             readCounts={readCounts}
@@ -512,7 +715,7 @@ export function TaskDetailPage(): JSX.Element {
           />
         )}
 
-        {tab === 'attachments' && (
+        {tab === "attachments" && (
           <AttachmentsSection
             attachments={attachments}
             loading={attachmentsLoading}
@@ -520,24 +723,38 @@ export function TaskDetailPage(): JSX.Element {
           />
         )}
 
-        {tab === 'audit' &&
+        {tab === "audit" &&
           (auditForbidden ? (
-            <ErrorState message={t('audit.forbidden')} />
+            <ErrorState message={t("audit.forbidden")} />
           ) : (
-            <AuditLog entries={auditEntries} loading={auditLoading} resolveAuthor={resolveAuthor} />
+            <AuditLog
+              entries={auditEntries}
+              loading={auditLoading}
+              resolveAuthor={resolveAuthor}
+            />
           ))}
       </div>
 
-      <AttachmentViewer attachment={viewerAttachment} onClose={() => setViewerAttachment(null)} />
+      <AttachmentViewer
+        attachment={viewerAttachment}
+        onClose={() => setViewerAttachment(null)}
+      />
       <TaskFormDialog
         open={formOpen}
+        surface={isMaxApp ? "max" : "site"}
         task={task}
         directory={directory}
         busy={formBusy}
         serverError={formError}
+        confirmBeforeSubmit
         onSubmit={(values) => void handleTaskEdit(values)}
         onCancel={closeEditForm}
       />
+      {toastMessage !== null && (
+        <div className="local-toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
     </section>
   );
 }

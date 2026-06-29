@@ -19,6 +19,7 @@ import {
   genericIconType,
   selectAttachmentRepresentation,
 } from './attachment-representation';
+import { DocumentPreviewService } from './document-preview.service';
 import {
   CompressedStream,
   DocumentPreview,
@@ -26,7 +27,6 @@ import {
   UploadFile,
   UploadedAttachment,
 } from './attachments.types';
-import { SpreadsheetPreviewService } from './spreadsheet-preview.service';
 import { THUMBNAIL_GENERATOR, ThumbnailGenerator } from './thumbnail-generator';
 
 /**
@@ -34,6 +34,26 @@ import { THUMBNAIL_GENERATOR, ThumbnailGenerator } from './thumbnail-generator';
  * Совпадает по смыслу с ролью отправителя в {@link ChatService}.
  */
 type Participant = 'ADMIN' | 'MANAGER' | 'EXECUTOR';
+
+const UNKNOWN_MIME_TYPE = 'application/octet-stream';
+
+const AUDIO_MIME_BY_EXTENSION = new Map<string, string>([
+  ['3gp', 'audio/3gpp'],
+  ['3gpp', 'audio/3gpp'],
+  ['aac', 'audio/aac'],
+  ['amr', 'audio/amr'],
+  ['flac', 'audio/flac'],
+  ['m4a', 'audio/mp4'],
+  ['mp3', 'audio/mpeg'],
+  ['mpga', 'audio/mpeg'],
+  ['oga', 'audio/ogg'],
+  ['ogg', 'audio/ogg'],
+  ['opus', 'audio/ogg'],
+  ['wav', 'audio/wav'],
+  ['wave', 'audio/wav'],
+  ['weba', 'audio/webm'],
+  ['webm', 'audio/webm'],
+]);
 
 /**
  * Прикладной сервис загрузки Вложений в Чат Задачи (Req 11.9, 12.1–12.5, 19.8,
@@ -79,7 +99,7 @@ export class AttachmentsService {
     private readonly config: AppConfigService,
     @Inject(THUMBNAIL_GENERATOR)
     private readonly thumbnailGenerator: ThumbnailGenerator,
-    private readonly spreadsheetPreviewService: SpreadsheetPreviewService = new SpreadsheetPreviewService(),
+    private readonly documentPreviewService: DocumentPreviewService = new DocumentPreviewService(),
   ) {}
 
   /**
@@ -133,6 +153,7 @@ export class AttachmentsService {
   ): Promise<UploadedAttachment> {
     // 1. Валидация метаданных ДО любого обращения к хранилищу.
     this.validateFileMeta(file);
+    const mimeType = this.resolveMimeType(file);
 
     // 2. Активность загружающего.
     const user = await this.userRepository.findActiveById(userId);
@@ -177,7 +198,7 @@ export class AttachmentsService {
       task: { connect: { id: task.id } },
       uploader: { connect: { id: user.id } },
       originalName: file.originalName,
-      mimeType: file.mimeType,
+      mimeType,
       sizeBytes: BigInt(stored.originalSize),
       storagePath: stored.storagePath,
       compression: stored.codec,
@@ -414,7 +435,7 @@ export class AttachmentsService {
   }
 
   /**
-   * Открывает документный PDF-предпросмотр табличного Вложения.
+   * Открывает PDF-предпросмотр офисного Вложения.
    *
    * Доступ проверяется теми же правилами, что и для исходного содержимого:
    * только Участник чата Задачи или Администратор получает рендер. Сервер
@@ -434,12 +455,12 @@ export class AttachmentsService {
 
     await this.loadParticipantTaskForAttachment(user, attachment);
 
-    if (!this.spreadsheetPreviewService.supports(attachment.mimeType, attachment.originalName)) {
+    if (!this.documentPreviewService.supports(attachment.mimeType, attachment.originalName)) {
       throw new EntityNotFoundException('Предпросмотр недоступен для этого типа вложения.');
     }
 
     const original = await this.storage.readDecompressed(attachment.storagePath);
-    const preview = await this.spreadsheetPreviewService.convertToPdf({
+    const preview = await this.documentPreviewService.convertToPdf({
       content: original,
       mimeType: attachment.mimeType,
       originalName: attachment.originalName,
@@ -453,16 +474,14 @@ export class AttachmentsService {
 
   /**
    * Валидирует метаданные загружаемого файла. Тип файла не ограничивается
-   * (Req 12.5); проверяется лишь наличие непустого имени и MIME-типа.
+   * (Req 12.5); проверяется лишь наличие непустого имени. MIME-тип может быть
+   * пустым у браузеров/ОС для части аудиофайлов и нормализуется отдельно.
    *
-   * @throws ValidationException Имя или MIME-тип отсутствуют/пусты.
+   * @throws ValidationException Имя отсутствует/пустое.
    */
   private validateFileMeta(file: UploadFile): void {
     if (typeof file.originalName !== 'string' || file.originalName.trim().length === 0) {
       throw new ValidationException('Имя файла обязательно.');
-    }
-    if (typeof file.mimeType !== 'string' || file.mimeType.trim().length === 0) {
-      throw new ValidationException('Тип файла обязателен.');
     }
     if (
       file.declaredSize !== undefined &&
@@ -478,6 +497,35 @@ export class AttachmentsService {
     return new ValidationException(
       `Размер файла превышает допустимый предел ${maxMb} МБ. Вложение не сохранено.`,
     );
+  }
+
+  /**
+   * Возвращает MIME-тип для хранения. Клиентские загрузки не всегда передают
+   * тип для аудио (`File.type === ""`) или отправляют `application/octet-stream`;
+   * в этих случаях восстанавливаем тип по расширению, чтобы браузерный
+   * `<audio>` получал корректный Blob.
+   */
+  private resolveMimeType(file: UploadFile): string {
+    const declared = typeof file.mimeType === 'string' ? this.normalizeMimeType(file.mimeType) : '';
+    const inferred = this.inferMimeTypeByExtension(file.originalName);
+    if (declared.length === 0 || declared === UNKNOWN_MIME_TYPE) {
+      return inferred ?? UNKNOWN_MIME_TYPE;
+    }
+    return declared;
+  }
+
+  private inferMimeTypeByExtension(originalName: string): string | undefined {
+    const extension = this.extractExtension(originalName)?.toLowerCase();
+    if (extension === undefined) {
+      return undefined;
+    }
+    return AUDIO_MIME_BY_EXTENSION.get(extension);
+  }
+
+  private normalizeMimeType(mimeType: string): string {
+    const semicolon = mimeType.indexOf(';');
+    const base = semicolon === -1 ? mimeType : mimeType.slice(0, semicolon);
+    return base.trim().toLowerCase();
   }
 
   /**

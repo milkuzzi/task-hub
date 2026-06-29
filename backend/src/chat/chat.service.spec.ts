@@ -108,6 +108,7 @@ interface Harness {
     broadcastMessageCounter: jest.Mock;
     broadcastStatus: jest.Mock;
     broadcastMessageReaders: jest.Mock;
+    broadcastTaskUpdated: jest.Mock;
   };
   audit: { record: jest.Mock };
   chatNotifications: { notifyNewMessage: jest.Mock; clearMessageNotification: jest.Mock };
@@ -155,6 +156,8 @@ function buildHarness(
 
   const userRepository = {
     findActiveById: jest.fn(async (id: string) => users[id] ?? null),
+    findById: jest.fn(async (id: string) => users[id] ?? null),
+    listActiveWithMaxLink: jest.fn(async () => Object.values(users)),
   } as unknown as UserRepository;
 
   const taskRepository = {
@@ -223,6 +226,7 @@ function buildHarness(
     broadcastMessageCounter: jest.fn(),
     broadcastStatus: jest.fn(),
     broadcastMessageReaders: jest.fn(),
+    broadcastTaskUpdated: jest.fn(),
   };
   const audit = { record: jest.fn(async () => undefined) };
 
@@ -389,7 +393,11 @@ describe('ChatService.sendMessage', () => {
       expect.objectContaining({ messageCount: 1 }),
     );
     expect(h.chatNotifications.notifyNewMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 'task-1', taskTitle: 'Задача' }),
+      expect.objectContaining({
+        taskId: 'task-1',
+        taskTitle: 'Задача',
+        authorDisplayName: 'Имя executor-1',
+      }),
     );
   });
 
@@ -404,6 +412,7 @@ describe('ChatService.sendMessage', () => {
     expect(h.audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ field: 'status', oldValue: 'IN_PROGRESS', newValue: 'WAITING' }),
     );
+    expect(h.chatNotifications.notifyNewMessage).toHaveBeenCalledTimes(1);
   });
 
   it('сообщение Менеджера в «Ожидает» переводит задачу в «В работе» (Req 10.2)', async () => {
@@ -455,6 +464,18 @@ describe('ChatService.sendMessage', () => {
     expect(h.gateway.broadcastMessageCounter).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({ messageCount: 9999 }),
+    );
+  });
+
+  it('рассылает chat-originated изменение задачи как message-событие даже при авто-смене статуса', async () => {
+    const h = buildHarness();
+
+    await h.service.sendMessage('executor-1', 'task-1', 'Обновление');
+
+    expect(h.gateway.broadcastTaskUpdated).toHaveBeenCalledWith(
+      'task-1',
+      { taskId: 'task-1', reason: 'message' },
+      expect.arrayContaining(['executor-1', 'manager-1', 'admin-1']),
     );
   });
 
@@ -589,6 +610,15 @@ describe('ChatService.editMessage', () => {
     ).resolves.toBeDefined();
   });
 
+  it('Менеджер задачи не вправе редактировать сообщение Администратора', async () => {
+    const h = buildHarness({ storedMessage: makeMessage({ authorId: 'admin-1' }) });
+
+    await expect(
+      h.service.editMessage('manager-1', 'message-1', 'Правка менеджера'),
+    ).rejects.toBeInstanceOf(AccessDeniedException);
+    expect(h.messageUpdates).toHaveLength(0);
+  });
+
   it('отклоняет правку Участником, не являющимся автором/Менеджером/Администратором (Req 11.6)', async () => {
     const h = buildHarness({ storedMessage: makeMessage({ authorId: 'executor-1' }) });
     h.users['executor-2'] = makeUser('executor-2', Role.EXECUTOR);
@@ -622,6 +652,15 @@ describe('ChatService.deleteMessage', () => {
       'task-1',
       expect.objectContaining({ deleted: true }),
     );
+  });
+
+  it('Менеджер задачи не вправе удалить сообщение Администратора', async () => {
+    const h = buildHarness({ storedMessage: makeMessage({ authorId: 'admin-1' }) });
+
+    await expect(h.service.deleteMessage('manager-1', 'message-1')).rejects.toBeInstanceOf(
+      AccessDeniedException,
+    );
+    expect(h.messageUpdates).toHaveLength(0);
   });
 
   it('отклоняет удаление Участником без прав (Req 11.6)', async () => {

@@ -73,6 +73,8 @@ describe('ChatController', () => {
         | 'deleteMessage'
         | 'markRead'
         | 'listReaders'
+        | 'isMuted'
+        | 'setMute'
       >
     >;
     req: AuthenticatedRequest;
@@ -98,6 +100,8 @@ describe('ChatController', () => {
         .mockResolvedValue([
           { userId: 'manager-1', displayName: 'Менеджер', readAt: NOW } as MessageReaderView,
         ]),
+      isMuted: jest.fn().mockResolvedValue(false),
+      setMute: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<
       Pick<
         ChatService,
@@ -107,6 +111,8 @@ describe('ChatController', () => {
         | 'deleteMessage'
         | 'markRead'
         | 'listReaders'
+        | 'isMuted'
+        | 'setMute'
       >
     >;
 
@@ -165,6 +171,18 @@ describe('ChatController', () => {
     const { controller, chatService, req } = buildController();
     await controller.send(TASK_ID, { text: 'Без вложений' }, req);
     expect(chatService.sendMessage).toHaveBeenCalledWith('executor-1', TASK_ID, 'Без вложений', []);
+  });
+
+  it('читает и обновляет настройку MAX-уведомлений задачи', async () => {
+    const { controller, chatService, req } = buildController();
+
+    await expect(controller.getMaxNotifications(TASK_ID, req)).resolves.toEqual({ muted: false });
+    await expect(controller.updateMaxNotifications(TASK_ID, { muted: true }, req)).resolves.toEqual(
+      { muted: true },
+    );
+
+    expect(chatService.isMuted).toHaveBeenCalledWith('executor-1', TASK_ID);
+    expect(chatService.setMute).toHaveBeenCalledWith('executor-1', TASK_ID, true);
   });
 
   it('редактирует Сообщение и возвращает представление с меткой «изменено» (Req 5.3, 11.5)', async () => {

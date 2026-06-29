@@ -1,55 +1,30 @@
-import {
-  Body,
-  Controller,
-  Inject,
-  Post,
-  Req,
-  UploadedFile,
-  UseGuards,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Delete, Get, Inject, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import {
   AccessDeniedException,
   EntityNotFoundException,
+  StateConflictException,
   ValidationException,
 } from '../common/errors';
+import { readSingleMultipartFile } from '../common/http';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { MAX_OAUTH_PORT, MaxOAuthExchangeError, type MaxOAuthPort } from '../max/oauth';
 import { UserRepository } from '../repositories';
 import { MaxProfile, UploadedFile as ProfileUploadedFile } from './profile.types';
 import { CurrentUserView, toCurrentUser } from './user-representation';
 import { UsersService } from './users.service';
-import { LinkMaxDto } from './dto';
+import { LinkMaxDto, UpdateMaxNotificationsDto, UpdateProfileDto } from './dto';
 
 /**
  * Единый лимит размера загружаемого аватара — 5 МБ (Req 3.1, 3.3 спеки;
  * исходное ТЗ Req 6.4, 6.9).
  *
- * Задаётся на интерсепторе загрузки (быстрый отказ до буферизации тела) и
- * дополнительно перепроверяется {@link UsersService.setAvatar} по значению
+ * Задаётся при streaming-разборе multipart-запроса и дополнительно
+ * перепроверяется {@link UsersService.setAvatar} по значению
  * `AppConfigService.limits.avatarMaxBytes` — источнику истины (двойной
  * контроль, Req 3.3).
  */
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
-
-/**
- * Минимально необходимое представление загруженного файла из multer
- * (`memoryStorage`), используемое контроллером (Req 3.1).
- *
- * Описано локально, чтобы не зависеть от внешних типов multer: содержимое
- * приходит буфером в памяти, метаданные — из формы.
- */
-interface UploadedMulterFile {
-  /** Исходное имя файла. */
-  originalname: string;
-  /** MIME-тип файла (проверяется на поддерживаемый растровый формат). */
-  mimetype: string;
-  /** Размер содержимого в байтах. */
-  size: number;
-  /** Содержимое файла целиком в памяти. */
-  buffer: Buffer;
-}
 
 /**
  * HTTP-слой собственного профиля текущего Пользователя (Req 3 спеки;
@@ -79,7 +54,7 @@ export class ProfileController {
    * Загрузка собственного аватара (Req 3.1, 3.3; исходное ТЗ Req 6.4, 6.9).
    *
    * Поле формы — `avatar` (контракт `frontend/src/lib/auth-api.ts`). Лимит 5 МБ
-   * задаётся на интерсепторе и перепроверяется сервисом; неподдерживаемый
+   * задаётся при streaming-разборе и перепроверяется сервисом; неподдерживаемый
    * формат или превышение размера отклоняются {@link ValidationException}, а
    * прежние данные профиля сохраняются (Req 3.3). Делегирует
    * {@link UsersService.setAvatar}, передавая идентификатор текущего
@@ -88,23 +63,36 @@ export class ProfileController {
    * `CurrentUser`.
    */
   @Post('avatar')
-  @UseInterceptors(FileInterceptor('avatar', { limits: { fileSize: AVATAR_MAX_BYTES } }))
-  async uploadAvatar(
-    @UploadedFile() file: UploadedMulterFile | undefined,
+  async uploadAvatar(@Req() req: AuthenticatedRequest): Promise<CurrentUserView> {
+    const userId = this.principal(req).userId;
+    const file = await readSingleMultipartFile(req as unknown as FastifyRequest, {
+      fieldName: 'avatar',
+      maxBytes: AVATAR_MAX_BYTES,
+    });
+    const uploaded: ProfileUploadedFile = {
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+      sizeBytes: file.size,
+      buffer: file.buffer,
+    };
+    await this.usersService.setAvatar(userId, userId, uploaded);
+    return this.currentUser(userId);
+  }
+
+  /**
+   * Изменение собственного отображаемого имени.
+   *
+   * Делегирует {@link UsersService.updateProfile}: на текущих доменных правилах
+   * это доступно только активному Администратору, но цель всегда равна текущему
+   * пользователю, поэтому через `/profile` нельзя менять чужие данные.
+   */
+  @Patch()
+  async updateProfile(
+    @Body() dto: UpdateProfileDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<CurrentUserView> {
     const userId = this.principal(req).userId;
-    if (file === undefined) {
-      throw new ValidationException('Файл не передан: ожидается поле «avatar».');
-    }
-    const uploaded: ProfileUploadedFile = {
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-      sizeBytes: file.size,
-      // `exactOptionalPropertyTypes`: поле `buffer` добавляется лишь при наличии.
-      ...(file.buffer !== undefined ? { buffer: file.buffer } : {}),
-    };
-    await this.usersService.setAvatar(userId, userId, uploaded);
+    await this.usersService.updateProfile(userId, userId, { displayName: dto.name });
     return this.currentUser(userId);
   }
 
@@ -136,7 +124,10 @@ export class ProfileController {
 
     let maxUserId: string;
     try {
-      maxUserId = await this.maxOAuth.exchangeAuthCode(dto.authCode);
+      maxUserId =
+        dto.redirectUri === undefined
+          ? await this.maxOAuth.exchangeAuthCode(dto.authCode)
+          : await this.maxOAuth.exchangeAuthCode(dto.authCode, dto.redirectUri);
     } catch (error) {
       // Неуспех обмена кода авторизации MAX (включая ненастроенную интеграцию)
       // трактуется как доменная ошибка привязки (Req 3.2, 9.6).
@@ -151,6 +142,42 @@ export class ProfileController {
     const maxProfile: MaxProfile = { maxUserId, verified: true };
     await this.usersService.linkMax(userId, maxProfile);
     return this.currentUser(userId);
+  }
+
+  /**
+   * Отвязка собственного профиля MAX.
+   *
+   * Удаляет связь `MaxLink` текущего пользователя и возвращает обновлённый
+   * `CurrentUser` с `maxLinked=false`. Операция идемпотентна: повторный вызов
+   * без активной привязки возвращает текущий профиль без ошибки.
+   */
+  @Delete('max')
+  async unlinkMax(@Req() req: AuthenticatedRequest): Promise<CurrentUserView> {
+    const userId = this.principal(req).userId;
+    await this.usersService.unlinkMax(userId);
+    return this.currentUser(userId);
+  }
+
+  @Get('max/notifications')
+  async getMaxNotifications(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ linked: boolean; muted: boolean }> {
+    const link = await this.userRepository.findMaxLinkByUserId(this.principal(req).userId);
+    return link === null ? { linked: false, muted: true } : { linked: true, muted: link.mutedAll };
+  }
+
+  @Patch('max/notifications')
+  async updateMaxNotifications(
+    @Body() dto: UpdateMaxNotificationsDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ linked: true; muted: boolean }> {
+    const userId = this.principal(req).userId;
+    const link = await this.userRepository.findMaxLinkByUserId(userId);
+    if (link === null) {
+      throw new StateConflictException('Профиль MAX не привязан к учётной записи.');
+    }
+    const updated = await this.userRepository.setMaxMutedAllByUserId(userId, dto.muted);
+    return { linked: true, muted: updated.mutedAll };
   }
 
   /**

@@ -20,12 +20,11 @@ export interface MaxDeliveryResult {
  * позволяет реализовать и протестировать политику ретраев и независимость
  * доставки на сайт независимо от готовности интеграции MAX.
  *
- * До подключения реальной интеграции к токену {@link MAX_DELIVERY_PORT}
- * привязана безопасная реализация {@link UnavailableMaxDeliveryAdapter},
- * которая сообщает о недоступности MAX. Это соответствует сценарию Req 13.13
- * (недоступность сервиса MAX / отсутствие подключённого Бота): уведомление
- * доставляется и сохраняется на сайте, а доставка в MAX переходит к ретраям и,
- * по их исчерпании, фиксируется как неуспешная.
+ * В штатном модуле к токену {@link MAX_DELIVERY_PORT} привязан HTTP-адаптер
+ * Bot API MAX. {@link UnavailableMaxDeliveryAdapter} оставлен как безопасная
+ * резервная реализация для тестов/локальных сборок без подключённого Бота:
+ * уведомление доставляется и сохраняется на сайте, а доставка в MAX переходит
+ * к ретраям и, по их исчерпании, фиксируется как неуспешная.
  */
 export interface MaxDeliveryPort {
   /**
@@ -49,10 +48,8 @@ export interface MaxDeliveryPort {
 /**
  * DI-токен порта {@link MaxDeliveryPort}.
  *
- * По умолчанию связан с {@link UnavailableMaxDeliveryAdapter} в
- * {@link import('../notifications.module').NotificationsModule}. Реальная
- * интеграция MAX (задача 13.x) переопределяет привязку, не затрагивая воркер
- * доставки.
+ * В {@link import('../notifications.module').NotificationsModule} связан с
+ * продуктовым адаптером MAX, не затрагивая воркер доставки.
  */
 export const MAX_DELIVERY_PORT = Symbol('MAX_DELIVERY_PORT');
 

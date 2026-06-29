@@ -191,13 +191,15 @@ export class TaskRepository extends BaseRepository {
   async list(
     pagination: PaginationQueryDto,
     where: Prisma.TaskWhereInput = {},
+    orderBy: Prisma.TaskOrderByWithRelationInput[] = [{ createdAt: 'desc' }, { id: 'asc' }],
     tx?: Prisma.TransactionClient,
-  ): Promise<Page<Task>> {
+  ): Promise<Page<TaskWithAssignments>> {
     const client = this.client(tx);
     const [items, total] = await Promise.all([
       client.task.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        include: { assignments: true },
+        orderBy,
         skip: pagination.skip,
         take: pagination.take,
       }),

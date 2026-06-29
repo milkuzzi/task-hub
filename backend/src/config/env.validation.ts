@@ -45,9 +45,18 @@ export const envValidationSchema = Joi.object({
   // --- MAX ---
   MAX_OAUTH_CLIENT_ID: Joi.string().allow('').default(''),
   MAX_OAUTH_CLIENT_SECRET: Joi.string().allow('').default(''),
+  MAX_OAUTH_AUTHORIZE_URL: Joi.string().uri().allow('').default(''),
   MAX_OAUTH_REDIRECT_URI: Joi.string().uri().default('https://localhost/auth/max/callback'),
+  MAX_BOT_USERNAME: Joi.string().allow('').default(''),
   MAX_BOT_TOKEN: Joi.string().allow('').default(''),
-  MAX_BOT_API_BASE_URL: Joi.string().uri().default('https://botapi.max.ru'),
+  MAX_BOT_WEBHOOK_SECRET: Joi.string()
+    .pattern(/^[A-Za-z0-9-]*$/)
+    .min(5)
+    .max(256)
+    .allow('')
+    .default(''),
+  MAX_BOT_API_BASE_URL: Joi.string().uri().default('https://platform-api2.max.ru'),
+  MAX_MINI_APP_INIT_DATA_TTL_SECONDS: Joi.number().integer().min(60).max(3600).default(300),
 
   // --- restic (резервные копии) ---
   RESTIC_REPOSITORY: Joi.string().allow('').default(''),

@@ -5,7 +5,7 @@ import { MAX_BOT_WEBHOOK_TOKEN_HEADER, MaxBotWebhookGuard } from './max-bot-webh
 
 /** Создаёт guard с заданным ожидаемым токеном Бота из конфигурации. */
 function createGuard(botToken: string): MaxBotWebhookGuard {
-  const config = { max: { botToken } } as unknown as AppConfigService;
+  const config = { max: { botWebhookSecret: botToken } } as unknown as AppConfigService;
   return new MaxBotWebhookGuard(config);
 }
 

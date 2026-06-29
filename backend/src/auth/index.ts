@@ -5,6 +5,12 @@ export { PasswordSetupTokenService } from './password-setup-token.service';
 export { SessionTokenService } from './session-token.service';
 export { SessionAuthGuard, type AuthenticatedRequest } from './session-auth.guard';
 export {
+  clearSessionCookie,
+  readSessionCookie,
+  setSessionCookie,
+  SESSION_COOKIE_NAME,
+} from './session-cookie';
+export {
   SESSION_DISCONNECTOR,
   SESSION_REVOKED_EVENT,
   NoopSessionDisconnector,

@@ -5,17 +5,27 @@ import {
   fetchDocumentPreviewBlob,
   formatAttachmentSize,
   openAttachment,
+  type AttachmentPreviewKind,
 } from "@/lib/attachments";
 import type { AttachmentMeta } from "@/lib/chat-api";
 import { useFocusTrap } from "./useFocusTrap";
+
+function usesPdfDocumentPreview(previewKind: AttachmentPreviewKind): boolean {
+  return (
+    previewKind === "pdf" ||
+    previewKind === "spreadsheet" ||
+    previewKind === "document" ||
+    previewKind === "presentation"
+  );
+}
 
 /**
  * Полноэкранный просмотр Вложения с распаковкой на клиенте (Req 12.9).
  *
  * При открытии загружает сжатый поток Вложения, распаковывает его на стороне
  * клиента без потерь и отображает поддержанный предпросмотр: изображение,
- * видео или серверный PDF-рендер таблицы (Req 12.9). Целостность распакованного
- * содержимого сверяется с контрольной суммой для исходных медиа; при
+ * видео, аудио или серверный PDF-рендер документа (Req 12.9). Целостность
+ * распакованного содержимого сверяется с контрольной суммой для исходных медиа; при
  * несовпадении показывается предупреждение, но доступный предпросмотр всё равно
  * отображается. Для типов без предпросмотра предлагается скачивание.
  *
@@ -68,15 +78,15 @@ export function AttachmentViewer({
     }
 
     setLoading(true);
-    if (previewKind === "spreadsheet") {
+    if (usesPdfDocumentPreview(previewKind)) {
       fetchDocumentPreviewBlob(attachment.id)
         .then((blob) => {
           if (revoked) {
             return;
           }
-          const objectUrl = URL.createObjectURL(blob);
-          revoke = () => URL.revokeObjectURL(objectUrl);
-          setUrl(objectUrl);
+          const previewUrl = URL.createObjectURL(blob);
+          revoke = () => URL.revokeObjectURL(previewUrl);
+          setUrl(previewUrl);
         })
         .catch(() => {
           if (!revoked) {
@@ -146,7 +156,7 @@ export function AttachmentViewer({
     setDownloading(true);
     let revoke: (() => void) | null = null;
     try {
-      let href = previewKind === "spreadsheet" ? null : url;
+      let href = usesPdfDocumentPreview(previewKind) ? null : url;
       if (href === null) {
         const result = await openAttachment(attachment);
         href = result.url;
@@ -206,7 +216,7 @@ export function AttachmentViewer({
 
         <div
           className={
-            previewKind === "spreadsheet"
+            usesPdfDocumentPreview(previewKind)
               ? "viewer__body viewer__body--document"
               : "viewer__body"
           }
@@ -234,9 +244,17 @@ export function AttachmentViewer({
           {previewKind === "video" && url !== null && (
             <video className="viewer__video" src={url} controls playsInline />
           )}
-          {previewKind === "spreadsheet" && url !== null && (
+          {previewKind === "audio" && url !== null && (
+            <audio
+              className="viewer__audio"
+              src={url}
+              controls
+              preload="metadata"
+            />
+          )}
+          {usesPdfDocumentPreview(previewKind) && url !== null && (
             <iframe
-              className="viewer__document"
+              className="viewer__document-frame"
               src={url}
               title={`${t("attachment.viewer.documentPreview")}: ${attachment.originalName}`}
             />

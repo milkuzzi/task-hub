@@ -5,30 +5,29 @@ import {
   useRef,
   useState,
   type ReactNode,
-} from 'react';
-import { tokenStore, setAuthRefreshHandler } from './api';
-import { connectSocket, disconnectSocket, reauthSocket } from './socket';
+} from "react";
+import { hasSessionBearerToken, setAuthRefreshHandler, setSessionBearerToken } from "./api";
+import { connectSocket, disconnectSocket, reauthSocket, setSocketAuthToken } from "./socket";
 import {
   fetchMe,
   login as apiLogin,
   loginWithMax as apiLoginWithMax,
   logout as apiLogout,
+  pollMaxBotLogin,
   refreshSession as apiRefreshSession,
+  startMaxBotLogin,
   type AuthSession,
   type CurrentUser,
-} from './auth-api';
-import { AuthContext, type AuthContextValue } from './use-auth';
+} from "./auth-api";
+import { AuthContext, type AuthContextValue } from "./use-auth";
 
 /**
  * Провайдер состояния аутентификации клиента.
  *
- * Хранит профиль текущего Пользователя и токен Сессии (Req 5.7). Токен
- * сохраняется в `localStorage`, чтобы Сессия переживала перезагрузку страницы,
- * и синхронизируется с `tokenStore` (заголовок Authorization в `api.ts`).
+ * Хранит профиль текущего Пользователя (Req 5.7). Сессия живёт в HttpOnly
+ * cookie, поэтому клиентский код не сохраняет bearer-токен в `localStorage`.
  * Socket.IO подключается после входа и отключается при выходе (Req 11.1, 19.10).
  */
-
-const TOKEN_STORAGE_KEY = 'session_token';
 
 /**
  * Интервал проактивного продления Сессии (скользящая сессия, Req 2.9;
@@ -38,28 +37,33 @@ const TOKEN_STORAGE_KEY = 'session_token';
  * аутентифицирован, чтобы активная работа не прерывалась преждевременным 401.
  */
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+const MAX_BOT_POLL_INTERVAL_MS = 2_000;
+const MAX_BOT_POLL_GRACE_MS = 10_000;
 
-/** Читает сохранённый токен Сессии из localStorage. */
-function readStoredToken(): string | null {
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function openPendingBotWindow(): Window | null {
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
+    return window.open("about:blank", "_blank");
   } catch {
     return null;
   }
 }
 
-/** Сохраняет либо очищает токен Сессии (localStorage + tokenStore). */
-function persistToken(token: string | null): void {
-  try {
-    if (token === null) {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-    } else {
-      localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    }
-  } catch {
-    // localStorage может быть недоступен (приватный режим) — токен останется в памяти.
+function navigateBotWindow(botWindow: Window | null, link: string): void {
+  if (botWindow !== null && !botWindow.closed) {
+    botWindow.opener = null;
+    botWindow.location.href = link;
+    botWindow.focus();
+    return;
   }
-  tokenStore.set(token);
+
+  const opened = window.open(link, "_blank", "noopener,noreferrer");
+  if (opened === null) {
+    window.location.assign(link);
+  }
 }
 
 function isSameCurrentUser(a: CurrentUser | null, b: CurrentUser): boolean {
@@ -75,7 +79,11 @@ function isSameCurrentUser(a: CurrentUser | null, b: CurrentUser): boolean {
 }
 
 /** Провайдер состояния аутентификации для дерева приложения. */
-export function AuthProvider({ children }: { children: ReactNode }): JSX.Element {
+export function AuthProvider({
+  children,
+}: {
+  children: ReactNode;
+}): JSX.Element {
   const [user, setUserState] = useState<CurrentUser | null>(null);
   const [initializing, setInitializing] = useState(true);
 
@@ -83,23 +91,26 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   // (таймер, возврат на вкладку, авто-повтор при 401) проходят через него,
   // поэтому одновременные продления не запускают несколько `POST /auth/refresh`
   // и не аннулируют токены друг друга (исправление гонки дефекта 9).
-  const refreshInFlightRef = useRef<Promise<string | null> | null>(null);
+  const refreshInFlightRef = useRef<Promise<boolean> | null>(null);
 
-  const refreshSession = useCallback((): Promise<string | null> => {
+  const refreshSession = useCallback((): Promise<boolean> => {
     if (refreshInFlightRef.current === null) {
       refreshInFlightRef.current = apiRefreshSession()
         .then((session) => {
-          persistToken(session.token);
           setUserState((current) =>
             isSameCurrentUser(current, session.user) ? current : session.user,
           );
           // Сервер выпускает новый `jti` и аннулирует прежний (спек 27.1),
-          // поэтому живому сокету нужно переподключиться с новым токеном,
-          // иначе соединение окажется с аннулированным токеном.
+          // поэтому живому сокету нужно переподключиться, чтобы handshake взял
+          // обновлённую HttpOnly-cookie.
+          if (hasSessionBearerToken()) {
+            setSessionBearerToken(session.token);
+            setSocketAuthToken(session.token);
+          }
           reauthSocket();
-          return session.token;
+          return true;
         })
-        .catch(() => null)
+        .catch(() => false)
         .finally(() => {
           refreshInFlightRef.current = null;
         });
@@ -108,25 +119,28 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   }, []);
 
   const applySession = useCallback((session: AuthSession): void => {
-    persistToken(session.token);
+    setSessionBearerToken(null);
+    setSocketAuthToken(null);
     setUserState(session.user);
     connectSocket();
   }, []);
 
   const clearSession = useCallback((): void => {
-    persistToken(null);
+    setSessionBearerToken(null);
+    setSocketAuthToken(null);
     setUserState(null);
     disconnectSocket();
   }, []);
 
-  // Восстановление Сессии по сохранённому токену при первом монтировании.
+  // Восстановление Сессии по HttpOnly-cookie при первом монтировании.
   useEffect(() => {
-    const token = readStoredToken();
-    if (token === null) {
+    // Mini-app всегда начинает с проверки подписанных данных MAX. Нельзя
+    // восстанавливать здесь произвольную cookie браузера параллельно: ответ
+    // старой сессии мог бы перезаписать подтверждённую MAX-личность.
+    if (window.location.pathname === "/max" || window.location.pathname.startsWith("/max/")) {
       setInitializing(false);
       return;
     }
-    tokenStore.set(token);
     let cancelled = false;
     fetchMe()
       .then((me) => {
@@ -137,9 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         connectSocket();
       })
       .catch(() => {
-        if (!cancelled) {
-          persistToken(null);
-        }
+        // Нет действующей cookie-сессии — остаёмся в анонимном состоянии.
       })
       .finally(() => {
         if (!cancelled) {
@@ -160,9 +172,48 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   );
 
   const signInWithMax = useCallback(
-    async (authCode: string): Promise<void> => {
-      const session = await apiLoginWithMax(authCode);
-      applySession(session);
+    async (authCode?: string, redirectUri?: string): Promise<void> => {
+      if (typeof authCode === "string" && authCode.trim() !== "") {
+        const session = await apiLoginWithMax(authCode, redirectUri);
+        applySession(session);
+        return;
+      }
+
+      const botWindow = openPendingBotWindow();
+      try {
+        const start = await startMaxBotLogin();
+        navigateBotWindow(botWindow, start.link);
+
+        const expiresAt = Date.parse(start.expiresAt);
+        const stopAt = Number.isFinite(expiresAt)
+          ? expiresAt + MAX_BOT_POLL_GRACE_MS
+          : Date.now() + 10 * 60_000;
+
+        while (Date.now() <= stopAt) {
+          await delay(MAX_BOT_POLL_INTERVAL_MS);
+          const status = await pollMaxBotLogin(start.state);
+
+          if (status.status === "pending") {
+            continue;
+          }
+          if (status.status === "confirmed") {
+            botWindow?.close();
+            applySession(status);
+            return;
+          }
+          if (status.status === "failed") {
+            throw new Error(status.reason);
+          }
+          throw new Error(
+            "Ссылка входа через MAX устарела. Повторите попытку.",
+          );
+        }
+
+        throw new Error("Ссылка входа через MAX устарела. Повторите попытку.");
+      } catch (error) {
+        botWindow?.close();
+        throw error;
+      }
     },
     [applySession],
   );
@@ -179,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
   const setUser = useCallback((next: CurrentUser): void => {
     setUserState(next);
+    connectSocket();
   }, []);
 
   // Проактивное продление Сессии, пока Пользователь аутентифицирован
@@ -202,17 +254,17 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
     const timer = window.setInterval(renew, REFRESH_INTERVAL_MS);
     const onVisible = (): void => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         renew();
       }
     };
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', renew);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", renew);
 
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', renew);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", renew);
     };
   }, [isAuthenticated, refreshSession]);
 
@@ -222,11 +274,11 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   // (продление вернуло null) — очищает Сессию (Req 3.9).
   useEffect(() => {
     setAuthRefreshHandler(async () => {
-      const token = await refreshSession();
-      if (token === null) {
+      const refreshed = await refreshSession();
+      if (!refreshed) {
         clearSession();
       }
-      return token;
+      return refreshed;
     });
     return () => setAuthRefreshHandler(null);
   }, [clearSession, refreshSession]);

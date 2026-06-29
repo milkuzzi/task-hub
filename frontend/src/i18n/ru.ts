@@ -67,6 +67,7 @@ export const ru = {
       statusActions: {
         heading: "Смена статуса",
         complete: "Выполнено",
+        startWork: "В работу",
         reopen: "Переоткрыть",
         cancel: "Отменить",
         return: "Вернуть в работу",
@@ -75,7 +76,7 @@ export const ru = {
         adminSet: "Установить статус: {{status}}",
         adminSelectLabel: "Выберите статус",
         adminSelectPlaceholder: "Выберите целевой статус",
-        adminApply: "Применить статус",
+        adminApply: "Применить",
         error: "Не удалось изменить статус. Повторите попытку.",
       },
       card: {
@@ -84,6 +85,8 @@ export const ru = {
         messages: "Сообщений",
         unread: "Есть непрочитанные сообщения",
         overdue: "Просрочено",
+        executors: "Исполнители",
+        managers: "Менеджеры",
       },
       list: {
         total: "Найдено задач: {{count}}",
@@ -92,6 +95,22 @@ export const ru = {
       search: {
         label: "Поиск по названию и описанию",
         placeholder: "Поиск по названию и описанию",
+        assignmentKind: "Роль в задаче",
+        assignmentKindAll: "Все роли",
+        assignmentKindManager: "Менеджер",
+        assignmentKindExecutor: "Исполнитель",
+        sortBy: "Сортировка задач",
+        sortDeadline: "По дедлайну",
+        sortStatus: "По статусу",
+        sortTitle: "По алфавиту",
+        directionDeadlineAsc: "Сначала ближайшие",
+        directionDeadlineDesc: "Сначала поздние",
+        directionStatusAsc: "По ходу работы",
+        directionStatusDesc: "В обратном порядке",
+        directionTitleAsc: "А–Я",
+        directionTitleDesc: "Я–А",
+        toggleDirection:
+          "Изменить направление сортировки. Сейчас: {{direction}}",
         deadlineFrom: "Дедлайн с",
         deadlineTo: "Дедлайн по",
         deadlineFromTitle: "Дедлайн от",
@@ -111,6 +130,12 @@ export const ru = {
       form: {
         createHeading: "Создание задачи",
         editHeading: "Изменение задачи",
+        confirmEditHeading: "Подтвердите изменение задачи",
+        confirmEditPrompt:
+          "После подтверждения параметры задачи будут сохранены и попадут в журнал изменений.",
+        confirmEditSummary: "Будут изменены поля:",
+        confirmEditNoChanges: "Изменений в параметрах не найдено.",
+        confirmEditAction: "Сохранить изменения",
         deadlineHint: "Время указывается по Москве (MSK).",
         multiHint: "Удерживайте Ctrl (⌘) для выбора нескольких пользователей.",
         participantSearch: "Найти участника",
@@ -123,6 +148,9 @@ export const ru = {
           executors: "Должно быть назначено от 1 до 100 исполнителей.",
           managers: "Должно быть назначено от 1 до 100 менеджеров.",
         },
+      },
+      toast: {
+        parametersUpdated: "Параметры задачи сохранены.",
       },
     },
     chat: {
@@ -143,6 +171,7 @@ export const ru = {
       deleted: "Сообщение удалено",
       editedMark: "изменено {{at}}",
       attachFile: "Прикрепить файл",
+      dropFiles: "Отпустите файлы, чтобы прикрепить их к сообщению.",
       attachedFiles: "Прикреплено файлов: {{count}}",
       readers: {
         toggle: "Прочитали: {{count}}",
@@ -155,6 +184,8 @@ export const ru = {
         attachmentsLimit:
           "К одному сообщению можно прикрепить не более 10 вложений.",
         attachmentSize: "Размер файла превышает 25 МБ.",
+        fileSelectionEmpty:
+          "Файл не выбран. Если MAX не показывает этот файл, попробуйте выбрать его через файловый менеджер.",
         uploadFailed: "Не удалось загрузить вложение. Повторите попытку.",
       },
     },
@@ -165,6 +196,7 @@ export const ru = {
       open: "Открыть",
       download: "Скачать",
       size: "Размер",
+      audioPlayer: "Аудиоплеер: {{name}}",
       viewer: {
         title: "Просмотр вложения",
         close: "Закрыть",
@@ -172,10 +204,16 @@ export const ru = {
         notPreviewable:
           "Предпросмотр недоступен для этого типа файла. Скачайте вложение.",
         documentPreview: "Предпросмотр документа",
-        emptySpreadsheet: "В таблице нет данных для предпросмотра.",
-        sheetName: "Лист: {{name}}",
-        sheetSummary:
-          "Показано {{rows}} из {{totalRows}} строк, {{columns}} из {{totalColumns}} столбцов.",
+        pdfPage: "Страница",
+        pdfPageCount: "Страниц: {{count}}",
+        pdfRendering: "Подготовка страниц: {{current}} из {{total}}",
+        pdfError:
+          "Не удалось отобразить предпросмотр. Скачайте оригинальный файл.",
+        zoomIn: "Увеличить",
+        zoomOut: "Уменьшить",
+        zoomValue: "{{value}}%",
+        fitWidth: "По ширине",
+        rotate: "Повернуть",
         error: "Не удалось открыть вложение.",
         integrityWarning:
           "Внимание: контрольная сумма не совпала, файл может быть повреждён.",
@@ -222,6 +260,7 @@ export const ru = {
       invalidCredentials: "Неверная электронная почта или пароль.",
       locked: "Учётная запись временно заблокирована. Повторите попытку позже.",
       maxProcessing: "Завершаем вход через MAX…",
+      maxWaiting: "Подтвердите вход в MAX…",
       maxFailed: "Не удалось войти через MAX. Повторите попытку.",
       maxStateMismatch:
         "Проверка безопасности входа через MAX не пройдена. Повторите попытку.",
@@ -267,6 +306,12 @@ export const ru = {
           "Неподдерживаемый формат изображения. Допустимы PNG, JPEG, WebP, GIF, BMP.",
         errorSize: "Размер файла превышает 5 МБ.",
       },
+      name: {
+        label: "Имя",
+        save: "Сохранить имя",
+        updated: "Имя обновлено.",
+        error: "Имя должно содержать от 1 до 200 символов.",
+      },
       password: {
         heading: "Пароль",
       },
@@ -275,10 +320,14 @@ export const ru = {
         linked: "Профиль MAX привязан.",
         notLinked: "Профиль MAX не привязан.",
         link: "Привязать MAX",
+        unlink: "Отвязать MAX",
+        waiting: "Подтвердите привязку в MAX…",
         processing: "Завершаем привязку MAX…",
         linkedSuccess: "Профиль MAX успешно привязан.",
+        unlinkedSuccess: "Профиль MAX отвязан.",
         failed:
           "Не удалось привязать профиль MAX. Возможно, он уже используется.",
+        unlinkFailed: "Не удалось отвязать профиль MAX. Повторите попытку.",
         stateMismatch:
           "Проверка безопасности привязки MAX не пройдена. Повторите попытку.",
         noCode: "MAX не вернул код авторизации.",
@@ -332,6 +381,10 @@ export const ru = {
       },
       errors: {
         range: "Дата начала не может быть позже даты окончания.",
+        exportPeriodRequired:
+          "Для выгрузки статистики выберите дату начала и дату окончания.",
+        exportPeriodInvalid:
+          "Проверьте период выгрузки: выберите обе даты, а дата начала должна быть не позже даты окончания.",
         export: "Не удалось сформировать файл экспорта. Повторите попытку.",
       },
     },
@@ -340,6 +393,11 @@ export const ru = {
       activeUsers: "Активные пользователи",
       deletedUsers: "Удалённые пользователи",
       noDeleted: "Нет удалённых пользователей.",
+      search: {
+        label: "Поиск пользователей",
+        placeholder: "Поиск по имени или электронной почте",
+        empty: "Пользователи не найдены.",
+      },
       columns: {
         user: "Пользователь",
         name: "Имя",
@@ -356,7 +414,13 @@ export const ru = {
         edit: "Изменить",
         transferAdmin: "Передать роль администратора",
         transferAdminShort: "Сделать админом",
+        transferAdministration: "Передать администрирование",
+        transferAdministrationShort: "Передать",
+        avatar: "Аватар",
         restore: "Восстановить",
+      },
+      avatar: {
+        updated: "Аватар пользователя «{{name}}» обновлён.",
       },
       invite: {
         heading: "Пригласить пользователя",
@@ -384,7 +448,9 @@ export const ru = {
           "Запись пользователя удаляется из базы. Его сообщения и вложения сохраняются с прежним отображаемым именем.",
       },
       transfer: {
-        heading: "Передача роли администратора",
+        heading: "Передача администрирования",
+        chooseUser: "Новый администратор",
+        placeholder: "Выберите пользователя",
         prompt: "Назначить пользователя «{{name}}» администратором?",
         hint: "Текущий администратор станет исполнителем, а его сессии будут аннулированы. В системе остаётся ровно один администратор.",
       },

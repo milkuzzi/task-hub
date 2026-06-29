@@ -1,5 +1,5 @@
-import { api, http } from './api';
-import type { UserRole } from './auth-api';
+import { api, http } from "./api";
+import type { UserRole } from "./auth-api";
 
 /**
  * Типы и REST-вызовы администрирования Пользователей «Системы поручений».
@@ -9,13 +9,14 @@ import type { UserRole } from './auth-api';
  * UsersModule дизайна:
  * - `inviteUser(email)` — регистрация Пользователя по email (Req 5.1–5.3).
  * - `updateUser(id, { email?, name? })` — изменение email/имени (Req 6.2, 6.3).
+ * - `uploadUserAvatar(id, file)` — изменение аватара Пользователя Администратором.
  * - `deleteUser(id, mode)` — удаление soft/hard с подтверждением (Req 8.1–8.3).
  * - `restoreUser(id, email)` — восстановление по сохранённому адресу (Req 7.2).
  * - `transferAdmin(id)` — передача роли администратора (Req 3.1).
  */
 
 /** Режим удаления: `soft` — с сохранением записи, `hard` — без (Req 8.1–8.3). */
-export type DeleteMode = 'soft' | 'hard';
+export type DeleteMode = "soft" | "hard";
 
 /** Активный Пользователь в списке администрирования. */
 export interface AdminUser {
@@ -50,26 +51,26 @@ export interface DeletedUser {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 function requireAdminUser(value: unknown): AdminUser {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
-    typeof value.email !== 'string' ||
-    typeof value.name !== 'string' ||
-    !['ADMIN', 'MANAGER', 'EXECUTOR'].includes(String(value.role)) ||
-    typeof value.active !== 'boolean' ||
-    typeof value.locked !== 'boolean' ||
-    typeof value.maxLinked !== 'boolean' ||
+    typeof value.id !== "string" ||
+    typeof value.email !== "string" ||
+    typeof value.name !== "string" ||
+    !["ADMIN", "MANAGER", "EXECUTOR"].includes(String(value.role)) ||
+    typeof value.active !== "boolean" ||
+    typeof value.locked !== "boolean" ||
+    typeof value.maxLinked !== "boolean" ||
     !(
       value.avatarPath === undefined ||
       value.avatarPath === null ||
-      typeof value.avatarPath === 'string'
+      typeof value.avatarPath === "string"
     )
   ) {
-    throw new TypeError('Некорректный ответ API: ожидался пользователь');
+    throw new TypeError("Некорректный ответ API: ожидался пользователь");
   }
   return value as unknown as AdminUser;
 }
@@ -77,19 +78,25 @@ function requireAdminUser(value: unknown): AdminUser {
 function requireDeletedUser(value: unknown): DeletedUser {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
-    typeof value.name !== 'string' ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
     !Array.isArray(value.emails) ||
-    !value.emails.every((email) => typeof email === 'string') ||
-    typeof value.deletedAt !== 'string' ||
+    !value.emails.every((email) => typeof email === "string") ||
+    typeof value.deletedAt !== "string" ||
     Number.isNaN(new Date(value.deletedAt).getTime())
   ) {
-    throw new TypeError('Некорректный ответ API: ожидался удалённый пользователь');
+    throw new TypeError(
+      "Некорректный ответ API: ожидался удалённый пользователь",
+    );
   }
   return value as unknown as DeletedUser;
 }
 
-function requireArray<T>(value: unknown, validate: (item: unknown) => T, label: string): T[] {
+function requireArray<T>(
+  value: unknown,
+  validate: (item: unknown) => T,
+  label: string,
+): T[] {
   if (!Array.isArray(value)) {
     throw new TypeError(`Некорректный ответ API: ожидался ${label}`);
   }
@@ -98,15 +105,19 @@ function requireArray<T>(value: unknown, validate: (item: unknown) => T, label: 
 
 /** Список активных Пользователей (Req 5.1 — раздел администрирования). */
 export async function listUsers(): Promise<AdminUser[]> {
-  return requireArray(await api.get<unknown>('/users'), requireAdminUser, 'список пользователей');
+  return requireArray(
+    await api.get<unknown>("/users"),
+    requireAdminUser,
+    "список пользователей",
+  );
 }
 
 /** Список удалённых Пользователей с сохранёнными адресами (Req 7.3, 8.2). */
 export async function listDeletedUsers(): Promise<DeletedUser[]> {
   return requireArray(
-    await api.get<unknown>('/users/deleted'),
+    await api.get<unknown>("/users/deleted"),
     requireDeletedUser,
-    'список удалённых пользователей',
+    "список удалённых пользователей",
   );
 }
 
@@ -115,7 +126,7 @@ export async function listDeletedUsers(): Promise<DeletedUser[]> {
  * Backend отправляет письмо со ссылкой установки пароля (TTL 24ч).
  */
 export async function inviteUser(email: string): Promise<AdminUser> {
-  return requireAdminUser(await api.post<unknown>('/users/invite', { email }));
+  return requireAdminUser(await api.post<unknown>("/users/invite", { email }));
 }
 
 /** Изменение адреса электронной почты и/или имени Пользователя (Req 6.2, 6.3). */
@@ -124,6 +135,18 @@ export async function updateUser(
   patch: { email?: string; name?: string },
 ): Promise<AdminUser> {
   return requireAdminUser(await api.patch<unknown>(`/users/${userId}`, patch));
+}
+
+/** Загрузка аватара выбранного Пользователя Администратором. */
+export async function uploadUserAvatar(
+  userId: string,
+  file: File,
+): Promise<AdminUser> {
+  const form = new FormData();
+  form.append("avatar", file);
+  return requireAdminUser(
+    await api.post<unknown>(`/users/${userId}/avatar`, form),
+  );
 }
 
 /**
@@ -141,7 +164,10 @@ export function deleteUser(userId: string, mode: DeleteMode): Promise<void> {
  * (Req 7.2). Backend отклоняет операцию при занятом адресе (Req 7.5) или при
  * отсутствии сохранённых адресов (Req 7.6) — UI показывает сообщение об ошибке.
  */
-export async function restoreUser(userId: string, email: string): Promise<AdminUser> {
+export async function restoreUser(
+  userId: string,
+  email: string,
+): Promise<AdminUser> {
   return requireAdminUser(
     await api.post<unknown>(`/users/${userId}/restore`, { email }),
   );

@@ -49,6 +49,12 @@ describe('StatusMachine', () => {
       });
     });
 
+    it('Менеджер: «Ожидает» → «В работе»', () => {
+      expect(machine.transition('WAITING', { type: 'START_WORK' }, 'MANAGER', false)).toEqual({
+        status: 'IN_PROGRESS',
+      });
+    });
+
     it('Менеджер: «Выполнено» → «В работе» (переоткрытие, Req 10.5)', () => {
       expect(machine.transition('DONE', { type: 'REOPEN' }, 'MANAGER', false)).toEqual({
         status: 'IN_PROGRESS',
@@ -98,6 +104,7 @@ describe('StatusMachine', () => {
   describe('transition — NO_PERMISSION (Req 10.14)', () => {
     const actorActions: StatusAction[] = [
       { type: 'COMPLETE' },
+      { type: 'START_WORK' },
       { type: 'REOPEN' },
       { type: 'CANCEL' },
       { type: 'RETURN' },
@@ -124,11 +131,23 @@ describe('StatusMachine', () => {
         error: 'NO_PERMISSION',
       });
     });
+
+    it('Администратор не вправе вручную запрашивать статус «Требует администратора»', () => {
+      expect(machine.transition('IN_PROGRESS', { type: 'REQUEST_ADMIN' }, 'ADMIN', false)).toEqual({
+        error: 'NO_PERMISSION',
+      });
+    });
   });
 
   describe('transition — INVALID_TRANSITION (Req 10.15)', () => {
     it('переоткрытие не из «Выполнено» недопустимо (Req 10.5)', () => {
       expect(machine.transition('IN_PROGRESS', { type: 'REOPEN' }, 'MANAGER', false)).toEqual({
+        error: 'INVALID_TRANSITION',
+      });
+    });
+
+    it('ручной перевод в работу не из «Ожидает» недопустим', () => {
+      expect(machine.transition('IN_PROGRESS', { type: 'START_WORK' }, 'MANAGER', false)).toEqual({
         error: 'INVALID_TRANSITION',
       });
     });

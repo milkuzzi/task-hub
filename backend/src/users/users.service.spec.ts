@@ -193,6 +193,14 @@ function buildService(overrides: {
     maxLinks.push(link);
     return link;
   });
+  const deleteMaxLinkByUserId = jest.fn(async (userId: string) => {
+    const index = maxLinks.findIndex((l) => l.userId === userId);
+    if (index === -1) {
+      return 0;
+    }
+    maxLinks.splice(index, 1);
+    return 1;
+  });
 
   const repository = {
     findActiveById,
@@ -208,6 +216,7 @@ function buildService(overrides: {
     findMaxLinkByMaxUserId,
     findMaxLinkByUserId,
     upsertMaxLink,
+    deleteMaxLinkByUserId,
   } as unknown as UserRepository;
 
   // Репозиторий задач: переназначение осиротевших задач при удалении (Req 8.5).
@@ -264,6 +273,7 @@ function buildService(overrides: {
     maxLinks,
     addEmailToHistory,
     upsertMaxLink,
+    deleteMaxLinkByUserId,
   };
 }
 
@@ -416,6 +426,15 @@ describe('UsersService.updateProfile (Req 6.2, 6.3, 6.8, 7.1)', () => {
 
     expect(result.displayName).toBe('Новое имя');
     expect(store.u1?.displayName).toBe('Новое имя');
+  });
+
+  it('Администратор меняет собственное имя', async () => {
+    const { service, store } = buildService({ users: { admin } });
+
+    const result = await service.updateProfile('admin', 'admin', { displayName: 'Михаил' });
+
+    expect(result.displayName).toBe('Михаил');
+    expect(store.admin?.displayName).toBe('Михаил');
   });
 
   it('Администратор меняет email и пополняет историю прежним и новым адресом (Req 6.2, 7.1)', async () => {
@@ -618,6 +637,36 @@ describe('UsersService.linkMax (Req 6.6, 6.9, 16.2)', () => {
     await expect(
       service.linkMax('ghost', { maxUserId: 'max-1', verified: true }),
     ).rejects.toBeInstanceOf(EntityNotFoundException);
+  });
+});
+
+describe('UsersService.unlinkMax', () => {
+  const admin = makeUser({ id: 'admin', role: Role.ADMIN });
+
+  it('отвязывает собственный профиль MAX', async () => {
+    const user = makeUser({ id: 'u1', role: Role.EXECUTOR });
+    const { service, maxLinks } = buildService({ users: { admin, u1: user } });
+
+    await service.linkMax('u1', { maxUserId: 'max-1', verified: true });
+    await service.unlinkMax('u1');
+
+    expect(maxLinks).toEqual([]);
+  });
+
+  it('идемпотентна, если профиль MAX уже не привязан', async () => {
+    const user = makeUser({ id: 'u1', role: Role.EXECUTOR });
+    const { service, deleteMaxLinkByUserId } = buildService({ users: { admin, u1: user } });
+
+    await service.unlinkMax('u1');
+
+    expect(deleteMaxLinkByUserId).toHaveBeenCalledWith('u1');
+  });
+
+  it('отклоняет отвязку для несуществующего пользователя', async () => {
+    const { service, deleteMaxLinkByUserId } = buildService({ users: { admin } });
+
+    await expect(service.unlinkMax('ghost')).rejects.toBeInstanceOf(EntityNotFoundException);
+    expect(deleteMaxLinkByUserId).not.toHaveBeenCalled();
   });
 });
 

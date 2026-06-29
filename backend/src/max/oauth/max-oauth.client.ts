@@ -40,18 +40,18 @@ interface MaxUserInfoResponse {
 export class MaxOAuthHttpClient implements MaxOAuthPort {
   constructor(private readonly config: AppConfigService) {}
 
-  async exchangeAuthCode(authCode: string): Promise<string> {
+  async exchangeAuthCode(authCode: string, redirectUri?: string): Promise<string> {
     if (typeof authCode !== 'string' || authCode.trim() === '') {
       throw new MaxOAuthExchangeError('Пустой код авторизации MAX.');
     }
 
-    const accessToken = await this.requestAccessToken(authCode);
+    const accessToken = await this.requestAccessToken(authCode, redirectUri);
     const maxUserId = await this.requestMaxUserId(accessToken);
     return maxUserId;
   }
 
   /** Обменивает код авторизации на токен доступа MAX (один сетевой вызов). */
-  private async requestAccessToken(authCode: string): Promise<string> {
+  private async requestAccessToken(authCode: string, redirectUri?: string): Promise<string> {
     const { oauthClientId, oauthClientSecret, oauthRedirectUri } = this.config.max;
 
     const response = await this.request(MAX_OAUTH_TOKEN_PATH, {
@@ -62,7 +62,7 @@ export class MaxOAuthHttpClient implements MaxOAuthPort {
         code: authCode,
         client_id: oauthClientId,
         client_secret: oauthClientSecret,
-        redirect_uri: oauthRedirectUri,
+        redirect_uri: redirectUri ?? oauthRedirectUri,
       }),
     });
 

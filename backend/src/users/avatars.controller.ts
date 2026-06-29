@@ -8,8 +8,8 @@ import {
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { Response } from 'express';
 import { AccessDeniedException, EntityNotFoundException } from '../common/errors';
+import { setResponseHeaders, type HttpResponseLike } from '../common/http';
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { UserRepository } from '../repositories';
 import { AVATAR_STORAGE, AvatarStorage } from './avatar-storage';
@@ -47,7 +47,7 @@ export class AvatarsController {
   async serve(
     @Param('userId') userId: string,
     @Req() req: AuthenticatedRequest,
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) res: HttpResponseLike,
   ): Promise<StreamableFile> {
     // Требуется действующая Сессия (любой Пользователь вправе видеть аватары).
     this.principal(req);
@@ -58,7 +58,7 @@ export class AvatarsController {
     }
 
     const { stream, contentType } = await this.avatarStorage.read(user.avatarPath);
-    res.set({ 'Content-Type': contentType });
+    setResponseHeaders(res, { 'Content-Type': contentType });
     return new StreamableFile(stream, { type: contentType });
   }
 
