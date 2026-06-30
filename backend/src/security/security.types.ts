@@ -3,7 +3,8 @@
  * (rate limiting) — вход, установка/смена пароля, отправка сообщения, загрузка
  * файла (Req 19.1).
  */
-export type SensitiveOp = 'login' | 'set_password' | 'change_password' | 'send_message' | 'upload';
+export type SensitiveOp =
+  'login' | 'password_reset' | 'set_password' | 'change_password' | 'send_message' | 'upload';
 
 /**
  * Результат проверки ограничения частоты запросов.

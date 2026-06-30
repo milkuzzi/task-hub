@@ -35,5 +35,9 @@ describe("LoginPage", () => {
       container.querySelector('img.auth-logo[src="/logo2090.png"]'),
     ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "На главную" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Забыли пароль?" })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
   });
 });

@@ -8,6 +8,7 @@ import { api } from "./api";
  * - `loginWithMax(authCode, redirectUri)` → legacy-сессия через OAuth MAX (Req 16.1, 16.3).
  * - `startMaxBotLogin()`/`pollMaxBotLogin(state)` → вход через Бота MAX.
  * - `setPassword(token, password)` — установка пароля по одноразовой ссылке (Req 5.5, 6.7).
+ * - `requestPasswordReset(email)` — запрос одноразовой ссылки восстановления пароля.
  * - `changePassword(current, next)` — смена собственного пароля (Req 6.1, 6.7).
  * - `updateProfileName(name)` — изменение собственного отображаемого имени.
  * - `setAvatar(file)` — собственный аватар (Req 6.4, 6.9).
@@ -113,6 +114,11 @@ export function pollMaxBotLogin(state: string): Promise<MaxBotLoginStatus> {
 /** Установка пароля по одноразовой ссылке (активация учётной записи, Req 5.5, 6.7). */
 export function setPassword(token: string, password: string): Promise<void> {
   return api.post<void>("/auth/set-password", { token, password });
+}
+
+/** Запросить ссылку восстановления пароля без раскрытия наличия учётной записи. */
+export function requestPasswordReset(email: string): Promise<void> {
+  return api.post<void>("/auth/password-reset/request", { email });
 }
 
 /** Смена собственного пароля при указании текущего (Req 6.1, 6.7). */

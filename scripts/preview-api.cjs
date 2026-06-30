@@ -288,6 +288,9 @@ const server = http.createServer(async (request, response) => {
   if (method === 'POST' && path === '/auth/change-password') {
     return sendJson(response, 200, {});
   }
+  if (method === 'POST' && path === '/auth/password-reset/request') {
+    return sendText(response, 204, '');
+  }
 
   if (method === 'GET' && path === '/users/directory') {
     return sendJson(response, 200, directory);

@@ -194,6 +194,36 @@ export class AuthService {
   }
 
   /**
+   * Выпускает одноразовую ссылку восстановления пароля для не удалённой учётной
+   * записи и ставит письмо в очередь отправки.
+   *
+   * Метод намеренно не раскрывает существование адреса: если учётная запись не
+   * найдена или была удалена, сценарий завершается успешно без отправки письма.
+   * Некорректный формат адреса отклоняется как ошибка ввода.
+   *
+   * @param email Адрес электронной почты Пользователя.
+   * @throws ValidationException При недопустимом формате адреса.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const normalizedEmail = email.trim();
+    const validation = validatePrimaryAdminEmail(normalizedEmail);
+    if (!validation.valid) {
+      throw new ValidationException(validation.reason);
+    }
+
+    const user = await this.userRepository.findActiveByEmail(normalizedEmail);
+    if (user === null) {
+      this.logger.log(
+        `Запрошено восстановление пароля для неизвестного адреса «${normalizedEmail}».`,
+      );
+      return;
+    }
+
+    const token = await this.setupTokens.issue(user.id);
+    await this.sendPasswordResetEmail(user, token);
+  }
+
+  /**
    * Устанавливает пароль по одноразовой ссылке и активирует учётную запись
    * (Req 5.5, 5.6, 6.7, 19.5–19.7).
    *
@@ -544,7 +574,7 @@ export class AuthService {
   /**
    * Формирует ссылку установки пароля и ставит регистрационное письмо в очередь
    * отправки (Req 15.1). Фактическая доставка с ретраями выполняется воркером
-   * очены email; учётная запись остаётся неактивной независимо от исхода
+   * очереди email; учётная запись остаётся неактивной независимо от исхода
    * доставки (Req 5.4, 15.4).
    */
   private async sendInvitationEmail(user: User, token: string): Promise<void> {
@@ -567,5 +597,35 @@ export class AuthService {
     });
 
     this.logger.log(`Приглашение для «${user.email}» поставлено в очередь отправки`);
+  }
+
+  /**
+   * Формирует письмо восстановления пароля. Ссылка использует тот же
+   * одноразовый механизм установки пароля: после перехода Пользователь задаёт
+   * новый пароль, а прежние блокировки входа сбрасываются.
+   */
+  private async sendPasswordResetEmail(user: User, token: string): Promise<void> {
+    const baseUrl = this.config.app.publicUrl.replace(/\/+$/, '');
+    const link = `${baseUrl}/set-password?token=${encodeURIComponent(token)}`;
+    const ttlHours = Math.round(this.config.limits.passwordSetupTtlSeconds / 3600);
+
+    await this.mailer.enqueue({
+      to: user.email,
+      subject: 'Восстановление пароля в Системе поручений',
+      html:
+        `<p>Здравствуйте!</p>` +
+        `<p>Мы получили запрос на восстановление пароля в «Системе поручений». ` +
+        `Чтобы задать новый пароль, перейдите по ссылке ниже. ` +
+        `Ссылка действительна ${ttlHours} ч.</p>` +
+        `<p><a href="${link}">Восстановить пароль</a></p>` +
+        `<p>Если вы не запрашивали восстановление пароля, просто проигнорируйте это письмо.</p>`,
+      text:
+        `Запрошено восстановление пароля в «Системе поручений». ` +
+        `Задайте новый пароль по ссылке (действительна ${ttlHours} ч): ${link}`,
+    });
+
+    this.logger.log(
+      `Ссылка восстановления пароля для «${user.email}» поставлена в очередь отправки`,
+    );
   }
 }

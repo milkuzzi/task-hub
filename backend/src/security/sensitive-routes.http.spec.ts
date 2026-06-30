@@ -31,6 +31,7 @@ describe('sensitive HTTP routes', () => {
   let authService: {
     login: jest.Mock;
     loginWithMax: jest.Mock;
+    requestPasswordReset: jest.Mock;
     setPassword: jest.Mock;
     changePassword: jest.Mock;
   };
@@ -54,6 +55,7 @@ describe('sensitive HTTP routes', () => {
         role: Role.ADMIN,
         expiresAt: new Date('2026-01-01T00:00:00.000Z'),
       }),
+      requestPasswordReset: jest.fn().mockResolvedValue(undefined),
       setPassword: jest.fn().mockResolvedValue(undefined),
       changePassword: jest.fn().mockResolvedValue(undefined),
     };
@@ -190,6 +192,24 @@ describe('sensitive HTTP routes', () => {
 
     expect(rateLimiter.check).toHaveBeenCalledWith(expect.any(String), 'set_password');
     expect(authService.setPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 429 on repeated password reset requests before issuing another link', async () => {
+    rateLimiter.check
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({ allowed: false });
+
+    await request(app.getHttpServer())
+      .post('/auth/password-reset/request')
+      .send({ email: 'admin@example.test' })
+      .expect(204);
+    await request(app.getHttpServer())
+      .post('/auth/password-reset/request')
+      .send({ email: 'admin@example.test' })
+      .expect(429);
+
+    expect(rateLimiter.check).toHaveBeenCalledWith(expect.any(String), 'password_reset');
+    expect(authService.requestPasswordReset).toHaveBeenCalledTimes(1);
   });
 
   it('returns 429 on repeated password changes before changing a password again', async () => {

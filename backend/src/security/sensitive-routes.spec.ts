@@ -26,6 +26,7 @@ describe('sensitive HTTP route rate limits', () => {
   it.each([
     ['login', 'login'],
     ['max', 'login'],
+    ['requestPasswordReset', 'password_reset'],
     ['setPassword', 'set_password'],
   ] as const)('protects AuthController.%s with %s throttling', (method, operation) => {
     expect(guardsFor(AuthController.prototype, method)).toContain(RateLimitGuard);

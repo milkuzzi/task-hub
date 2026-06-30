@@ -5,6 +5,7 @@ describe('AuthController MAX OAuth start', () => {
   const authService = {
     login: jest.fn(),
     loginWithMax: jest.fn(),
+    requestPasswordReset: jest.fn(),
     setPassword: jest.fn(),
     changePassword: jest.fn(),
     revokeAllSessions: jest.fn(),

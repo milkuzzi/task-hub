@@ -11,6 +11,8 @@ export const RATE_LIMIT_OP_KEY = 'security:rateLimitOp';
  *
  * Применяется к методам контроллеров чувствительных операций:
  * - вход — `AuthController.login` (`'login'`);
+ * - запрос восстановления пароля — `AuthController.requestPasswordReset`
+ *   (`'password_reset'`);
  * - установка пароля — `AuthController.setPassword` (`'set_password'`);
  * - смена пароля — `UsersController.changePassword` (`'change_password'`);
  * - отправка сообщения — HTTP-обработчик/обвязка Gateway (`'send_message'`);

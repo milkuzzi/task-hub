@@ -4,6 +4,7 @@ import { Layout } from "@/components/Layout";
 import { LoadingState } from "@/components/LoadingState";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { LoginPage } from "@/pages/LoginPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { SetPasswordPage } from "@/pages/SetPasswordPage";
 import { MaxCallbackPage } from "@/pages/MaxCallbackPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
@@ -80,6 +81,7 @@ export const router = createBrowserRouter(
       children: [
         // Публичные маршруты аутентификации.
         { path: "login", element: <LoginPage /> },
+        { path: "forgot-password", element: <ForgotPasswordPage /> },
         { path: "set-password", element: <SetPasswordPage /> },
         {
           path: "auth/max/callback",

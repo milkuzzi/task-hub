@@ -24,7 +24,13 @@ import { AuthService } from './auth.service';
 import { AuthSession } from './auth.types';
 import { SessionAuthGuard, AuthenticatedRequest } from './session-auth.guard';
 import { clearSessionCookie, setSessionCookie } from './session-cookie';
-import { LoginDto, MaxLoginDto, SetPasswordDto, ChangePasswordDto } from './dto';
+import {
+  LoginDto,
+  MaxLoginDto,
+  SetPasswordDto,
+  ChangePasswordDto,
+  PasswordResetRequestDto,
+} from './dto';
 
 /** Ответ успешной аутентификации: токен Сессии и профиль (контракт `auth-api.ts`). */
 interface AuthSessionResponse {
@@ -135,6 +141,18 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setPassword(@Body() dto: SetPasswordDto): Promise<void> {
     await this.authService.setPassword(dto.token, dto.password);
+  }
+
+  /**
+   * Запрос ссылки восстановления пароля. Ответ всегда пустой и успешный для
+   * валидного email-формата, чтобы не раскрывать наличие учётной записи.
+   */
+  @Post('password-reset/request')
+  @UseGuards(RateLimitGuard)
+  @RateLimit('password_reset')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async requestPasswordReset(@Body() dto: PasswordResetRequestDto): Promise<void> {
+    await this.authService.requestPasswordReset(dto.email);
   }
 
   /**

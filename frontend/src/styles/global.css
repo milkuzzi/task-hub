@@ -900,6 +900,31 @@ summary:focus-visible,
   font-weight: var(--fw-semibold);
 }
 
+.auth-panel__helper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: calc(var(--space-2) * -1);
+}
+
+.auth-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--color-link);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+}
+
+.auth-link:hover {
+  text-decoration: underline;
+}
+
+.auth-link--center {
+  width: 100%;
+  justify-content: center;
+}
+
 .auth-logo {
   display: block;
   width: 2.5rem;

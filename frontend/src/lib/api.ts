@@ -99,7 +99,9 @@ function isAuthFlowRequest(url: string | undefined): boolean {
   return (
     url.includes("/auth/refresh") ||
     url.includes("/auth/login") ||
-    url.includes("/auth/max")
+    url.includes("/auth/max") ||
+    url.includes("/auth/set-password") ||
+    url.includes("/auth/password-reset")
   );
 }
 

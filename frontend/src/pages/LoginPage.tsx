@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/lib/use-auth";
 import { ApiError } from "@/lib/api";
@@ -125,6 +125,12 @@ export function LoginPage(): JSX.Element {
             disabled={submitting || maxSubmitting}
           />
         </label>
+
+        <div className="auth-panel__helper">
+          <Link className="auth-link" to="/forgot-password">
+            {t("login.forgotPassword")}
+          </Link>
+        </div>
 
         <button
           className="btn btn--primary btn--block"

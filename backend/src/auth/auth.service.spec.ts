@@ -277,6 +277,41 @@ describe('AuthService (Req 5)', () => {
     });
   });
 
+  describe('requestPasswordReset', () => {
+    it('выпускает ссылку восстановления пароля для существующей учётной записи', async () => {
+      findActiveByEmail.mockResolvedValue(activeUser);
+
+      await service.requestPasswordReset(' active@example.com ');
+
+      expect(findActiveByEmail).toHaveBeenCalledWith('active@example.com');
+      expect(issue).toHaveBeenCalledWith('user-2');
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      const message = enqueue.mock.calls[0][0];
+      expect(message.to).toBe('active@example.com');
+      expect(message.subject).toContain('Восстановление пароля');
+      expect(message.text).toContain('raw-token');
+      expect(message.html).toContain('Восстановить пароль');
+    });
+
+    it('не раскрывает неизвестный адрес и не отправляет письмо', async () => {
+      findActiveByEmail.mockResolvedValue(null);
+
+      await expect(service.requestPasswordReset('ghost@example.com')).resolves.toBeUndefined();
+
+      expect(findActiveByEmail).toHaveBeenCalledWith('ghost@example.com');
+      expect(issue).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('отклоняет некорректный формат адреса', async () => {
+      await expect(service.requestPasswordReset('bad')).rejects.toBeInstanceOf(ValidationException);
+
+      expect(findActiveByEmail).not.toHaveBeenCalled();
+      expect(issue).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+  });
+
   describe('login (Req 5.7-5.10, 19.3, 19.4)', () => {
     it('выпускает сессию при верных учётных данных и сбрасывает счётчик (Req 5.7)', async () => {
       findActiveByEmail.mockResolvedValue({ ...activeUser, failedLoginCount: 2 });
