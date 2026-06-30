@@ -41,7 +41,7 @@ describe("ForgotPasswordPage", () => {
 
     expect(mockedRequestPasswordReset).toHaveBeenCalledWith("user@example.com");
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Если учётная запись с таким адресом существует",
+      "Ссылка для восстановления пароля отправлена",
     );
     expect(
       screen.getByRole("link", { name: "Вернуться ко входу" }),

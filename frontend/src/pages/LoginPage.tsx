@@ -127,7 +127,7 @@ export function LoginPage(): JSX.Element {
         </label>
 
         <div className="auth-panel__helper">
-          <Link className="auth-link" to="/forgot-password">
+          <Link className="auth-link auth-link--center" to="/forgot-password">
             {t("login.forgotPassword")}
           </Link>
         </div>
