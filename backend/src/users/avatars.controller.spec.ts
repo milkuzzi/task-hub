@@ -29,7 +29,7 @@ describe('AvatarsController', () => {
 
   function buildController(opts: { user?: User | null } = {}): {
     controller: AvatarsController;
-    userRepository: { findActiveById: jest.Mock };
+    userRepository: { findById: jest.Mock };
     avatarStorage: { read: jest.Mock };
     req: AuthenticatedRequest;
     res: Response;
@@ -40,7 +40,7 @@ describe('AvatarsController', () => {
       contentType: 'image/png',
     };
     const userRepository = {
-      findActiveById: jest.fn().mockResolvedValue(opts.user === undefined ? makeUser() : opts.user),
+      findById: jest.fn().mockResolvedValue(opts.user === undefined ? makeUser() : opts.user),
     };
     const avatarStorage = {
       read: jest.fn().mockResolvedValue(content),
@@ -62,10 +62,22 @@ describe('AvatarsController', () => {
   it('отдаёт аватар как поток с корректным Content-Type (Req 6.4, 19.8)', async () => {
     const { controller, userRepository, avatarStorage, req, res, headers } = buildController();
     const result = await controller.serve('user-1', req, res);
-    expect(userRepository.findActiveById).toHaveBeenCalledWith('user-1');
+    expect(userRepository.findById).toHaveBeenCalledWith('user-1');
     expect(avatarStorage.read).toHaveBeenCalledWith('avatars/user-1/abc.png');
     expect(result).toBeInstanceOf(StreamableFile);
     expect(headers['Content-Type']).toBe('image/png');
+  });
+
+  it('отдаёт аватар soft-deleted Пользователя для административных списков', async () => {
+    const deleted = makeUser({
+      deletedAt: new Date('2026-06-30T00:00:00.000Z'),
+      avatarPath: 'avatars/deleted/avatar.png',
+    });
+    const { controller, avatarStorage, req, res } = buildController({ user: deleted });
+
+    await controller.serve('deleted-1', req, res);
+
+    expect(avatarStorage.read).toHaveBeenCalledWith('avatars/deleted/avatar.png');
   });
 
   it('возвращает 404, если Пользователь не найден (Req 2.12)', async () => {

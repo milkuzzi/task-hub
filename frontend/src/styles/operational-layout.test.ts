@@ -224,4 +224,34 @@ describe("Operational layout source invariants", () => {
       "grid-template-columns: repeat(2, minmax(0, 1fr))",
     );
   });
+
+  it("uses an external action surface for MAX document previews", () => {
+    const css = source("styles/global.css");
+
+    expect(css).toContain(".viewer-overlay--max");
+    expect(css).toContain(".viewer__body--document-external");
+    expect(css).toContain(".viewer__document-actions");
+    expect(css).toContain(".viewer__document-action-list");
+    expect(css).toMatch(
+      /\.viewer__document-action-button\s*{[^}]*width:\s*100%;/s,
+    );
+    expect(css).toMatch(
+      /\.viewer-overlay--max \.viewer__body--document-external\s*{[^}]*min-height:\s*0;/s,
+    );
+  });
+
+  it("renders attachments as rectangular tiles with visible metadata", () => {
+    const css = source("styles/global.css");
+
+    expect(css).toContain("--attachment-card-width");
+    expect(css).toContain("grid-template-columns: var(--attachment-preview-size) minmax(0, 1fr)");
+    expect(css).toContain(".attachment-tile__details");
+    expect(css).toContain(".attachment-tile__name");
+    expect(css).toMatch(
+      /\.attachment-tile__name\s*{[^}]*text-overflow:\s*ellipsis;/s,
+    );
+    expect(css).toMatch(
+      /\.chat-msg__attachments \.attachment-tile\s*{[^}]*--attachment-card-width:/s,
+    );
+  });
 });

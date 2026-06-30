@@ -11,6 +11,7 @@ import { AppConfigService } from '../config';
 import { MailerService } from '../mailer';
 import { TaskRepository, UserRepository } from '../repositories';
 import { AuthService } from '../auth/auth.service';
+import { validateDisplayName } from './display-name';
 import { validatePrimaryAdminEmail } from './email-validation';
 import { validateAvatar } from './avatar';
 import { AVATAR_STORAGE, AvatarStorage } from './avatar-storage';
@@ -92,7 +93,7 @@ export class UsersService {
         );
       }
 
-      return this.userRepository.create(
+      const created = await this.userRepository.create(
         {
           email: validEmail,
           displayName: DEFAULT_ADMIN_DISPLAY_NAME,
@@ -101,6 +102,8 @@ export class UsersService {
         },
         tx,
       );
+      await this.userRepository.addEmailToHistory(created.id, validEmail, tx);
+      return created;
     });
   }
 
@@ -310,6 +313,7 @@ export class UsersService {
       if (mode === 'soft') {
         // Запись сохраняется и помечается удалённой; имя сохраняется в задачах и
         // чатах без обезличивания (Req 8.2, 8.4).
+        await this.userRepository.addEmailToHistory(userId, target.email, tx);
         await this.userRepository.update(
           userId,
           { deletedAt: this.clock.now(), isActive: false },
@@ -514,7 +518,7 @@ export class UsersService {
       }
 
       if (patch.displayName !== undefined) {
-        const displayName = this.validateDisplayName(patch.displayName);
+        const displayName = validateDisplayName(patch.displayName);
         data.displayName = displayName;
       }
 
@@ -661,25 +665,6 @@ export class UsersService {
     if (deleted > 0) {
       this.logger.log(`Пользователь «${userId}» отвязал профиль MAX.`);
     }
-  }
-
-  /**
-   * Проверяет и нормализует отображаемое имя пользователя (Req 6.3).
-   *
-   * Имя должно быть непустым после удаления краевых пробелов и не превышать
-   * 200 символов. Возвращает нормализованное (обрезанное по краям) значение.
-   *
-   * @throws ValidationException При пустом или слишком длинном имени.
-   */
-  private validateDisplayName(displayName: string): string {
-    const trimmed = displayName.trim();
-    if (trimmed.length === 0) {
-      throw new ValidationException('Имя пользователя не может быть пустым.');
-    }
-    if (trimmed.length > 200) {
-      throw new ValidationException('Имя пользователя не должно превышать 200 символов.');
-    }
-    return trimmed;
   }
 
   /**

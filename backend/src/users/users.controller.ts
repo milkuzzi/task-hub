@@ -10,6 +10,8 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
@@ -19,7 +21,7 @@ import {
   EntityNotFoundException,
   ValidationException,
 } from '../common/errors';
-import { readSingleMultipartFile } from '../common/http';
+import { readSingleMultipartFile, setResponseHeaders, type HttpResponseLike } from '../common/http';
 import { AuthService, SessionAuthGuard, AuthenticatedRequest } from '../auth';
 import { ClockService } from '../clock';
 import { UserRepository } from '../repositories';
@@ -32,6 +34,7 @@ import {
   toDirectoryUser,
 } from './user-representation';
 import { UsersService } from './users.service';
+import { UsersExcelService, UsersImportResult } from './users-excel.service';
 import { InviteUserDto, RestoreUserDto, UpdateUserDto } from './dto';
 import { UploadedFile as ProfileUploadedFile } from './profile.types';
 
@@ -40,6 +43,9 @@ type DeleteMode = 'soft' | 'hard';
 
 /** Единый лимит размера аватара — 5 МБ. */
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Единый лимит размера Excel-файла импорта Пользователей — 5 МБ. */
+const USERS_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * HTTP-слой администрирования Пользователей (Req 2, 3, 5, 6, 7, 8).
@@ -58,6 +64,7 @@ export class UsersController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
+    private readonly usersExcel: UsersExcelService,
     private readonly userRepository: UserRepository,
     private readonly clock: ClockService,
   ) {}
@@ -100,6 +107,30 @@ export class UsersController {
     return users.map(toDirectoryUser);
   }
 
+  /** Экспортирует активных и удалённых Пользователей в Excel-файл. */
+  @Get('export')
+  async exportUsers(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<StreamableFile> {
+    const file = await this.usersExcel.exportUsers(this.principal(req).userId);
+    setResponseHeaders(res, {
+      'Content-Type': file.mimeType,
+      'Content-Disposition': `attachment; filename="${file.filename}"`,
+    });
+    return new StreamableFile(file.content, { type: file.mimeType });
+  }
+
+  /** Импортирует Пользователей из Excel-файла: новые получают приглашение, существующим меняется имя. */
+  @Post('import')
+  async importUsers(@Req() req: AuthenticatedRequest): Promise<UsersImportResult> {
+    const file = await readSingleMultipartFile(req as unknown as FastifyRequest, {
+      fieldName: 'file',
+      maxBytes: USERS_IMPORT_MAX_BYTES,
+    });
+    return this.usersExcel.importUsers(this.principal(req).userId, file);
+  }
+
   /**
    * Приглашение нового Пользователя по адресу электронной почты (Req 5.1–5.3).
    *
@@ -112,7 +143,7 @@ export class UsersController {
     @Body() dto: InviteUserDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AdminUserView> {
-    const created = await this.authService.invite(this.principal(req).userId, dto.email);
+    const created = await this.authService.invite(this.principal(req).userId, dto.email, dto.name);
     return this.toAdminUserById(created.id);
   }
 

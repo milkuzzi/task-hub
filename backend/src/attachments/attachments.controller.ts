@@ -6,8 +6,9 @@ import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { ChatService } from '../chat';
 import { AttachmentMetaView, toAttachmentMeta } from '../chat';
 import { RateLimit, RateLimitGuard } from '../security';
+import { AttachmentTicketService } from './attachment-ticket.service';
 import { AttachmentsService } from './attachments.service';
-import { UploadFile } from './attachments.types';
+import { DocumentExternalLinks, UploadFile } from './attachments.types';
 
 /**
  * Единый лимит размера загружаемого Вложения — 25 МБ (Req 12.2, 12.3).
@@ -17,6 +18,16 @@ import { UploadFile } from './attachments.types';
  * конфигурации — источника истины (двойной контроль, Req 12.3).
  */
 const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+function contentDisposition(
+  disposition: 'inline' | 'attachment',
+  fallbackFileName: string,
+  fileName: string,
+): string {
+  return `${disposition}; filename="${fallbackFileName}"; filename*=UTF-8''${encodeURIComponent(
+    fileName,
+  )}`;
+}
 
 /**
  * HTTP-слой Вложений Чата Задачи (Req 6.1–6.5 спеки; Req 11.9, 11.10, 12).
@@ -43,6 +54,7 @@ export class AttachmentsController {
   constructor(
     private readonly chatService: ChatService,
     private readonly attachmentsService: AttachmentsService,
+    private readonly attachmentTickets: AttachmentTicketService,
   ) {}
 
   /**
@@ -149,6 +161,22 @@ export class AttachmentsController {
   }
 
   /**
+   * Короткоживущие внешние ссылки на PDF-предпросмотр и оригинал Вложения.
+   *
+   * Используется MAX mini-app: внешний browser/PDF viewer не может передать
+   * Bearer-токен mini-app, поэтому клиент сначала получает ticket-ссылки через
+   * авторизованный запрос, а затем открывает их через MAX Bridge.
+   */
+  @Post('attachments/:id/document-links')
+  async documentLinks(
+    @Param('id') attachmentId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<DocumentExternalLinks> {
+    const userId = this.principal(req).userId;
+    return this.attachmentTickets.issueDocumentLinks(userId, attachmentId);
+  }
+
+  /**
    * Отдача миниатюры Вложения-изображения (Req 6.4, 12.6, 12.7, 19.8).
    *
    * Делегирует {@link AttachmentsService.openThumbnail}: членство в чате
@@ -179,5 +207,42 @@ export class AttachmentsController {
       throw new AccessDeniedException('Требуется вход в систему.');
     }
     return req.user;
+  }
+}
+
+/**
+ * Публичная отдача временных ticket-ссылок.
+ *
+ * Guard здесь намеренно отсутствует: ticket уже является короткоживущим
+ * секретом, а сервис при каждом открытии заново проверяет права пользователя,
+ * сохранённого в payload ticket.
+ */
+@Controller()
+export class AttachmentTicketsController {
+  constructor(private readonly attachmentTickets: AttachmentTicketService) {}
+
+  @Get('attachment-tickets/:token')
+  async open(
+    @Param('token') token: string,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<StreamableFile> {
+    const ticket = await this.attachmentTickets.openTicket(token);
+    setResponseHeaders(res, { 'Cache-Control': 'no-store' });
+
+    if (ticket.kind === 'preview') {
+      setResponseHeaders(res, {
+        'Content-Disposition': contentDisposition('inline', 'preview.pdf', ticket.content.fileName),
+      });
+      return new StreamableFile(ticket.content.content, { type: ticket.content.mimeType });
+    }
+
+    setResponseHeaders(res, {
+      'Content-Disposition': contentDisposition(
+        'attachment',
+        'attachment',
+        ticket.content.fileName,
+      ),
+    });
+    return new StreamableFile(ticket.content.content, { type: ticket.content.mimeType });
   }
 }

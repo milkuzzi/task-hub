@@ -12,6 +12,12 @@ export interface AppEnv {
   publicUrl: string;
 }
 
+/** Конфигурация служебных observability endpoints. */
+export interface MetricsConfig {
+  /** Если задан, `/metrics` требует `Authorization: Bearer <token>`. */
+  token: string;
+}
+
 /**
  * Конфигурация аутентификации по JWT-токенам доступа (Req 5.7, 19.10).
  *
@@ -160,6 +166,7 @@ export interface StorageConfig {
 /** Корневая конфигурация приложения. */
 export interface AppConfiguration {
   app: AppEnv;
+  metrics: MetricsConfig;
   auth: AuthConfig;
   database: DatabaseConfig;
   redis: RedisConfig;

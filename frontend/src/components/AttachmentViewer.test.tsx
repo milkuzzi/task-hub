@@ -1,8 +1,34 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachmentViewer } from "./AttachmentViewer";
-import { fetchDocumentPreviewBlob, openAttachment } from "@/lib/attachments";
+import {
+  fetchDocumentExternalLinks,
+  fetchDocumentPreviewBlob,
+  openAttachment,
+} from "@/lib/attachments";
 import type { AttachmentMeta } from "@/lib/chat-api";
+
+vi.mock("./PdfDocumentViewer", () => ({
+  PdfDocumentViewer: ({
+    fileName,
+    surface,
+    onError,
+  }: {
+    blob: Blob;
+    fileName: string;
+    surface?: "site" | "max";
+    onError: () => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="pdf-document-viewer"
+      data-surface={surface}
+      onClick={onError}
+    >
+      {fileName}
+    </button>
+  ),
+}));
 
 vi.mock("@/lib/attachments", async () => {
   const actual =
@@ -11,11 +37,13 @@ vi.mock("@/lib/attachments", async () => {
     );
   return {
     ...actual,
+    fetchDocumentExternalLinks: vi.fn(),
     fetchDocumentPreviewBlob: vi.fn(),
     openAttachment: vi.fn(),
   };
 });
 
+const mockedFetchDocumentExternalLinks = vi.mocked(fetchDocumentExternalLinks);
 const mockedFetchDocumentPreviewBlob = vi.mocked(fetchDocumentPreviewBlob);
 const mockedOpenAttachment = vi.mocked(openAttachment);
 
@@ -35,8 +63,10 @@ function meta(overrides: Partial<AttachmentMeta> = {}): AttachmentMeta {
 }
 
 afterEach(() => {
+  mockedFetchDocumentExternalLinks.mockReset();
   mockedFetchDocumentPreviewBlob.mockReset();
   mockedOpenAttachment.mockReset();
+  delete window.WebApp;
   vi.restoreAllMocks();
 });
 
@@ -62,6 +92,46 @@ describe("AttachmentViewer", () => {
     expect(audio).not.toBeNull();
     expect(audio).toHaveAttribute("controls");
     expect(audio).toHaveAttribute("src", "blob:audio-preview");
+
+    unmount();
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("открывает video-вложение по расширению при неточном MIME", async () => {
+    const revoke = vi.fn();
+    mockedOpenAttachment.mockResolvedValue({
+      url: "blob:video-preview",
+      blob: new Blob(["video"], { type: "video/mp4" }),
+      mimeType: "video/mp4",
+      integrityOk: true,
+      revoke,
+    });
+
+    const { container, unmount } = render(
+      <AttachmentViewer
+        surface="max"
+        attachment={meta({
+          id: "att-video",
+          originalName: "clip.mp4",
+          mimeType: "application/octet-stream",
+        })}
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(mockedOpenAttachment).toHaveBeenCalledWith(
+        meta({
+          id: "att-video",
+          originalName: "clip.mp4",
+          mimeType: "application/octet-stream",
+        }),
+      ),
+    );
+    const video = container.querySelector("video.viewer__video");
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute("controls");
+    expect(video).toHaveAttribute("src", "blob:video-preview");
 
     unmount();
     expect(revoke).toHaveBeenCalledTimes(1);
@@ -188,10 +258,25 @@ describe("AttachmentViewer", () => {
     expect(container.querySelector("iframe")).not.toBeNull();
   });
 
-  it("не показывает PDF iframe в мобильной MAX mini-app", () => {
-    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile",
-    );
+  it("в MAX mini-app показывает внешние действия документа без iframe и canvas", async () => {
+    const openLink = vi.fn();
+    const downloadFile = vi.fn().mockResolvedValue(undefined);
+    window.WebApp = {
+      initData: "auth_date=1&hash=test",
+      openLink,
+      downloadFile,
+    };
+    mockedFetchDocumentExternalLinks.mockResolvedValue({
+      preview: {
+        url: "/api/attachment-tickets/preview-token",
+        fileName: "report.pdf",
+      },
+      original: {
+        url: "/api/attachment-tickets/original-token",
+        fileName: "report.xlsx",
+      },
+      expiresAt: "2026-06-30T10:05:00.000Z",
+    });
 
     const { container } = render(
       <AttachmentViewer
@@ -206,12 +291,66 @@ describe("AttachmentViewer", () => {
       />,
     );
 
-    expect(mockedFetchDocumentPreviewBlob).not.toHaveBeenCalled();
-    expect(container.querySelector("iframe")).toBeNull();
-    expect(
-      screen.getByText(
-        "В мобильной версии MAX встроенный просмотр документов недоступен. Скачайте оригинальный файл.",
+    await waitFor(() =>
+      expect(mockedFetchDocumentExternalLinks).toHaveBeenCalledWith(
+        "att-mobile-doc",
       ),
+    );
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector(".pdf-document-viewer__canvas")).toBeNull();
+    expect(container.querySelector(".viewer-overlay--max")).not.toBeNull();
+    expect(
+      screen.getByText("Документ готов к просмотру"),
     ).toBeInTheDocument();
+    expect(mockedFetchDocumentPreviewBlob).not.toHaveBeenCalled();
+
+    expect(
+      screen.queryByText(
+        "PDF откроется во внешнем просмотрщике, где доступны масштабирование и копирование текста.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Скачать PDF" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Скачать оригинал" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Предпросмотр" }));
+    expect(openLink).toHaveBeenCalledWith(
+      `${window.location.origin}/api/attachment-tickets/preview-token`,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Скачать" }));
+    await waitFor(() =>
+      expect(downloadFile).toHaveBeenCalledWith(
+        `${window.location.origin}/api/attachment-tickets/original-token`,
+        "report.xlsx",
+      ),
+    );
+  });
+
+  it("показывает ошибку внешних ссылок MAX и оставляет скачивание доступным", async () => {
+    mockedFetchDocumentExternalLinks.mockRejectedValue(new Error("failed"));
+
+    render(
+      <AttachmentViewer
+        surface="max"
+        attachment={meta({
+          id: "att-mobile-doc",
+          originalName: "report.xlsx",
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        })}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Не удалось открыть вложение.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Скачать" }),
+    ).toBeEnabled();
   });
 });

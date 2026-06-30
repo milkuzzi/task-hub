@@ -32,6 +32,7 @@
     "bullmq": "^5.79.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "exceljs": "^4.4.0",
     "ioredis": "5.4.2",
     "joi": "^17.13.3",
     "reflect-metadata": "^0.2.2",

@@ -9,9 +9,11 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowCounterClockwise,
   CrownSimple,
+  DownloadSimple,
   ImageSquare,
   PencilSimple,
   Trash,
+  UploadSimple,
 } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/use-auth";
 import { ApiError } from "@/lib/api";
@@ -22,15 +24,19 @@ import { AVATAR_SUPPORTED_TYPES, validateAvatar } from "@/lib/avatar";
 import { formatMsk } from "@/lib/time";
 import {
   deleteUser,
+  exportUsers,
+  importUsers,
   listDeletedUsers,
   listUsers,
   restoreUser,
   transferAdmin,
   updateUser,
   uploadUserAvatar,
+  usersExportFileName,
   type AdminUser,
   type DeletedUser,
   type DeleteMode,
+  type UsersImportResult,
 } from "@/lib/users-api";
 
 /**
@@ -50,6 +56,7 @@ export function AdminUsersPage(): JSX.Element {
   const { t } = useTranslation();
   const { user: current, setUser } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [deleted, setDeleted] = useState<DeletedUser[]>([]);
@@ -77,6 +84,11 @@ export function AdminUsersPage(): JSX.Element {
   const [avatarBusyId, setAvatarBusyId] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarSuccess, setAvatarSuccess] = useState<string | null>(null);
+  const [excelBusy, setExcelBusy] = useState<"export" | "import" | null>(null);
+  const [excelError, setExcelError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<UsersImportResult | null>(
+    null,
+  );
 
   const isAdmin = current?.role === "ADMIN";
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase("ru-RU");
@@ -189,6 +201,63 @@ export function AdminUsersPage(): JSX.Element {
     setAvatarError(null);
     setAvatarSuccess(null);
     setActionError(null);
+  }
+
+  function downloadBlob(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleExportUsers(): Promise<void> {
+    setExcelError(null);
+    setImportResult(null);
+    setExcelBusy("export");
+    try {
+      const blob = await exportUsers();
+      downloadBlob(blob, usersExportFileName());
+    } catch (err) {
+      setExcelError(
+        err instanceof ApiError ? err.message : t("admin.excel.exportError"),
+      );
+    } finally {
+      setExcelBusy(null);
+    }
+  }
+
+  function handleImportClick(): void {
+    setExcelError(null);
+    importInputRef.current?.click();
+  }
+
+  async function handleImportChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) {
+      return;
+    }
+
+    setExcelError(null);
+    setImportResult(null);
+    setExcelBusy("import");
+    try {
+      const result = await importUsers(file);
+      setImportResult(result);
+      await reload();
+    } catch (err) {
+      setExcelError(
+        err instanceof ApiError ? err.message : t("admin.excel.importError"),
+      );
+    } finally {
+      setExcelBusy(null);
+    }
   }
 
   async function runAction(action: () => Promise<void>): Promise<void> {
@@ -317,7 +386,77 @@ export function AdminUsersPage(): JSX.Element {
         <div className="page-head__content">
           <h1>{t("admin.heading")}</h1>
         </div>
+        <div className="page-head__actions">
+          <button
+            className="btn btn--sm"
+            type="button"
+            disabled={excelBusy !== null}
+            aria-busy={excelBusy === "export"}
+            onClick={() => void handleExportUsers()}
+          >
+            <DownloadSimple size={16} aria-hidden="true" />
+            {excelBusy === "export"
+              ? t("common.loading")
+              : t("admin.excel.export")}
+          </button>
+          <button
+            className="btn btn--sm btn--primary"
+            type="button"
+            disabled={excelBusy !== null}
+            aria-busy={excelBusy === "import"}
+            onClick={handleImportClick}
+          >
+            <UploadSimple size={16} aria-hidden="true" />
+            {excelBusy === "import"
+              ? t("common.loading")
+              : t("admin.excel.import")}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            aria-label={t("admin.excel.importLabel")}
+            hidden
+            onChange={(event) => void handleImportChange(event)}
+          />
+        </div>
       </div>
+
+      {excelError !== null && (
+        <p className="form-error" role="alert">
+          {excelError}
+        </p>
+      )}
+      {importResult !== null && (
+        <div className="admin-import-report" role="status">
+          <p className="form-success">
+            {t("admin.excel.importSummary", {
+              created: importResult.created,
+              updated: importResult.updated,
+              unchanged: importResult.unchanged,
+              failed: importResult.failed,
+            })}
+          </p>
+          {importResult.errors.length > 0 && (
+            <ul className="admin-import-report__errors">
+              {importResult.errors.slice(0, 10).map((error) => (
+                <li key={`${error.row}:${error.email ?? ""}:${error.message}`}>
+                  {error.email === undefined
+                    ? t("admin.excel.rowError", {
+                        row: error.row,
+                        message: error.message,
+                      })
+                    : t("admin.excel.rowErrorWithEmail", {
+                        row: error.row,
+                        email: error.email,
+                        message: error.message,
+                      })}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <article className="panel panel--compact stack admin-section">
         <h2>{t("admin.invite.heading")}</h2>
@@ -495,7 +634,11 @@ export function AdminUsersPage(): JSX.Element {
               {filteredDeleted.map((u) => (
                 <li className="admin-directory__row" key={u.id}>
                   <div className="admin-directory__identity">
-                    <UserAvatar userId={null} hasAvatar={false} size="md" />
+                    <UserAvatar
+                      userId={u.id}
+                      avatarPath={u.avatarPath ?? null}
+                      size="md"
+                    />
                     <div className="admin-directory__identity-copy">
                       <strong>{u.name}</strong>
                       <span>{u.emails[0] ?? t("admin.restore.noEmails")}</span>

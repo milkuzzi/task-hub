@@ -16,6 +16,8 @@ export interface MaxWebApp {
   platform?: "ios" | "android" | "desktop" | "web" | string;
   version?: string;
   BackButton?: MaxBackButton;
+  openLink?: (url: string) => void;
+  downloadFile?: (url: string, fileName: string) => Promise<unknown>;
 }
 
 declare global {

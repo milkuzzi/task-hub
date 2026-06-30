@@ -65,11 +65,16 @@ describe('Property 11: Валидация адреса электронной п
     const countActiveAdmins = jest.fn().mockResolvedValue(0);
     const findByEmail = jest.fn().mockResolvedValue(null);
     const create = jest.fn().mockResolvedValue(createdAdmin);
+    const addEmailToHistory = jest.fn().mockResolvedValue({
+      userId: createdAdmin.id,
+      email: createdAdmin.email,
+    });
     const runInTransaction = jest.fn((fn: (tx: unknown) => unknown) => fn({}));
     const repository = {
       countActiveAdmins,
       findByEmail,
       create,
+      addEmailToHistory,
       runInTransaction,
     } as unknown as UserRepository;
     return { repository, countActiveAdmins, findByEmail, create };

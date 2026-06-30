@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/api';
 import { inviteUser, type AdminUser } from '@/lib/users-api';
 
 /**
- * Форма приглашения нового Пользователя по адресу электронной почты (Req 5.1).
+ * Форма приглашения нового Пользователя по имени и адресу электронной почты (Req 5.1).
  *
  * Только Администратор может регистрировать Пользователей (Req 5.1, 5.2); экран
  * администрирования доступен лишь администратору. После успешного приглашения
@@ -26,6 +26,7 @@ function isEmailLike(value: string): boolean {
 
 export function InviteUserForm({ onInvited }: InviteUserFormProps): JSX.Element {
   const { t } = useTranslation();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -36,6 +37,11 @@ export function InviteUserForm({ onInvited }: InviteUserFormProps): JSX.Element 
     setError(null);
     setSuccess(false);
 
+    if (name.trim().length === 0 || name.trim().length > 200) {
+      setError(t('admin.invite.errors.name'));
+      return;
+    }
+
     if (!isEmailLike(email)) {
       setError(t('admin.invite.errors.email'));
       return;
@@ -43,8 +49,9 @@ export function InviteUserForm({ onInvited }: InviteUserFormProps): JSX.Element 
 
     setSubmitting(true);
     try {
-      const user = await inviteUser(email.trim());
+      const user = await inviteUser({ email: email.trim(), name: name.trim() });
       setSuccess(true);
+      setName('');
       setEmail('');
       onInvited(user);
     } catch (err) {
@@ -66,6 +73,19 @@ export function InviteUserForm({ onInvited }: InviteUserFormProps): JSX.Element 
           {t('admin.invite.success')}
         </p>
       )}
+
+      <label className="field">
+        <span className="field__label">{t('admin.columns.name')}</span>
+        <input
+          className="field__input"
+          type="text"
+          autoComplete="off"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={submitting}
+        />
+      </label>
 
       <label className="field">
         <span className="field__label">{t('login.email')}</span>

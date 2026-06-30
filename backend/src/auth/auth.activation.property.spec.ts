@@ -85,6 +85,7 @@ describe('Property 13: Активация учётной записи (Req 5.4, 
       id: 'user-1',
       email: 'invitee@example.com',
       role: Role.EXECUTOR as Role,
+      displayName: 'Приглашённый',
       isActive: false,
       passwordHash: null as string | null,
       deletedAt: userDeleted ? new Date() : null,
@@ -98,6 +99,7 @@ describe('Property 13: Активация учётной записи (Req 5.4, 
     const create = jest.fn(async (data: Partial<typeof account>) => {
       account.isActive = data.isActive ?? account.isActive;
       account.email = (data.email as string) ?? account.email;
+      account.displayName = (data.displayName as string) ?? account.displayName;
       account.role = (data.role as Role) ?? account.role;
       return account as unknown as User;
     });
@@ -113,6 +115,9 @@ describe('Property 13: Активация учётной записи (Req 5.4, 
       findByEmail,
       create,
       update,
+      addEmailToHistory: jest
+        .fn()
+        .mockResolvedValue({ userId: 'user-1', email: 'invitee@example.com' }),
       runInTransaction,
     } as unknown as UserRepository;
 
@@ -165,7 +170,7 @@ describe('Property 13: Активация учётной записи (Req 5.4, 
           // 1. Приглашение создаёт неактивную учётную запись и ставит письмо в
           //    очередь. До установки пароля учётная запись остаётся неактивной
           //    независимо от факта/исхода отправки письма (Req 5.4).
-          await service.invite('admin-id', 'invitee@example.com');
+          await service.invite('admin-id', 'invitee@example.com', 'Приглашённый');
           expect(account.isActive).toBe(false);
           expect(enqueue).toHaveBeenCalledTimes(1);
           expect(account.passwordHash).toBeNull();

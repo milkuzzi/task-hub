@@ -10,7 +10,7 @@ import {
 import { AuthenticatedRequest, SessionAuthGuard } from '../auth';
 import { ChatService } from '../chat';
 import { AttachmentWithCreatedAt } from '../repositories';
-import { AttachmentsController } from './attachments.controller';
+import { AttachmentTicketsController, AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
 import {
   CompressedStream,
@@ -60,6 +60,10 @@ describe('AttachmentsController', () => {
       openCompressed: jest.Mock;
       openDocumentPreview: jest.Mock;
       openThumbnail: jest.Mock;
+    };
+    attachmentTickets: {
+      issueDocumentLinks: jest.Mock;
+      openTicket: jest.Mock;
     };
     req: AuthenticatedRequest;
     res: Response;
@@ -111,10 +115,19 @@ describe('AttachmentsController', () => {
       openDocumentPreview: jest.fn().mockResolvedValue(preview),
       openThumbnail: jest.fn().mockResolvedValue(thumbnail),
     };
+    const attachmentTickets = {
+      issueDocumentLinks: jest.fn().mockResolvedValue({
+        preview: { url: '/api/attachment-tickets/preview-token', fileName: 'report.pdf' },
+        original: { url: '/api/attachment-tickets/original-token', fileName: 'report.xlsx' },
+        expiresAt: '2026-06-30T10:05:00.000Z',
+      }),
+      openTicket: jest.fn(),
+    };
 
     const controller = new AttachmentsController(
       chatService as unknown as ChatService,
       attachmentsService as unknown as AttachmentsService,
+      attachmentTickets as unknown as import('./attachment-ticket.service').AttachmentTicketService,
     );
 
     const req = {
@@ -130,7 +143,7 @@ describe('AttachmentsController', () => {
       set: jest.fn((value: Record<string, string>) => Object.assign(headers, value)),
     } as unknown as Response;
 
-    return { controller, chatService, attachmentsService, req, res, headers };
+    return { controller, chatService, attachmentsService, attachmentTickets, req, res, headers };
   }
 
   function makeMulterFile(): {
@@ -252,6 +265,18 @@ describe('AttachmentsController', () => {
     );
   });
 
+  it('выдаёт временные ссылки на документ через авторизованный маршрут', async () => {
+    const { controller, attachmentTickets, req } = buildController();
+    const result = await controller.documentLinks(ATTACHMENT_ID, req);
+
+    expect(attachmentTickets.issueDocumentLinks).toHaveBeenCalledWith('executor-1', ATTACHMENT_ID);
+    expect(result).toEqual({
+      preview: { url: '/api/attachment-tickets/preview-token', fileName: 'report.pdf' },
+      original: { url: '/api/attachment-tickets/original-token', fileName: 'report.xlsx' },
+      expiresAt: '2026-06-30T10:05:00.000Z',
+    });
+  });
+
   it('отдаёт миниатюру изображения как поток (Req 6.4, 12.6)', async () => {
     const { controller, attachmentsService, req } = buildController();
     const result = await controller.thumbnail(ATTACHMENT_ID, req);
@@ -286,5 +311,68 @@ describe('AttachmentsController', () => {
   it('SessionAuthGuard объявлен на контроллере (Req 1.5)', () => {
     const guards = Reflect.getMetadata('__guards__', AttachmentsController) as unknown[];
     expect(guards).toContain(SessionAuthGuard);
+  });
+});
+
+describe('AttachmentTicketsController', () => {
+  function buildTicketController(): {
+    controller: AttachmentTicketsController;
+    attachmentTickets: { openTicket: jest.Mock };
+    res: Response;
+    headers: Record<string, string>;
+  } {
+    const attachmentTickets = {
+      openTicket: jest.fn(),
+    };
+    const controller = new AttachmentTicketsController(
+      attachmentTickets as unknown as import('./attachment-ticket.service').AttachmentTicketService,
+    );
+    const headers: Record<string, string> = {};
+    const res = {
+      set: jest.fn((value: Record<string, string>) => Object.assign(headers, value)),
+    } as unknown as Response;
+    return { controller, attachmentTickets, res, headers };
+  }
+
+  it('отдаёт PDF ticket inline без SessionAuthGuard', async () => {
+    const { controller, attachmentTickets, res, headers } = buildTicketController();
+    attachmentTickets.openTicket.mockResolvedValueOnce({
+      kind: 'preview',
+      content: {
+        content: Buffer.from('pdf-bytes'),
+        mimeType: 'application/pdf',
+        fileName: 'отчёт.pdf',
+      },
+    });
+
+    const result = await controller.open('preview-token', res);
+
+    expect(attachmentTickets.openTicket).toHaveBeenCalledWith('preview-token');
+    expect(result).toBeInstanceOf(StreamableFile);
+    expect(headers['Cache-Control']).toBe('no-store');
+    expect(headers['Content-Disposition']).toBe(
+      'inline; filename="preview.pdf"; filename*=UTF-8\'\'%D0%BE%D1%82%D1%87%D1%91%D1%82.pdf',
+    );
+    expect(Reflect.getMetadata('__guards__', AttachmentTicketsController)).toBeUndefined();
+  });
+
+  it('отдаёт original ticket как attachment с исходным именем', async () => {
+    const { controller, attachmentTickets, res, headers } = buildTicketController();
+    attachmentTickets.openTicket.mockResolvedValueOnce({
+      kind: 'original',
+      content: {
+        content: Buffer.from('xlsx-bytes'),
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        fileName: 'report.xlsx',
+      },
+    });
+
+    const result = await controller.open('original-token', res);
+
+    expect(result).toBeInstanceOf(StreamableFile);
+    expect(headers['Cache-Control']).toBe('no-store');
+    expect(headers['Content-Disposition']).toBe(
+      'attachment; filename="attachment"; filename*=UTF-8\'\'report.xlsx',
+    );
   });
 });

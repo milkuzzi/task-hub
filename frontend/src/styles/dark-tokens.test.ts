@@ -88,6 +88,8 @@ describe('Тёмная схема и дефолт light в global.css', () => {
       '--color-text',
       '--color-muted',
       '--color-primary',
+      '--sidebar-brand-fg',
+      '--sidebar-user-fg',
     ];
 
     for (const token of roles) {

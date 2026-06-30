@@ -38,6 +38,9 @@ export function configuration(): AppConfiguration {
       port: int(env.PORT, 3000),
       publicUrl: str(env.PUBLIC_URL, 'https://localhost'),
     },
+    metrics: {
+      token: str(env.METRICS_TOKEN, ''),
+    },
     auth: {
       jwtSecret: str(env.JWT_SECRET, 'dev-insecure-jwt-secret-change-me'),
       accessTokenTtlSeconds: int(env.ACCESS_TOKEN_TTL_SECONDS, 86400),

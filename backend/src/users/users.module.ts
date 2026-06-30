@@ -5,6 +5,7 @@ import { UsersController } from './users.controller';
 import { ProfileController } from './profile.controller';
 import { AvatarsController } from './avatars.controller';
 import { UsersService } from './users.service';
+import { UsersExcelService } from './users-excel.service';
 import { AVATAR_STORAGE, FileSystemAvatarStorage } from './avatar-storage';
 
 /**
@@ -29,7 +30,11 @@ import { AVATAR_STORAGE, FileSystemAvatarStorage } from './avatar-storage';
 @Module({
   imports: [AuthModule, MaxOAuthModule],
   controllers: [UsersController, ProfileController, AvatarsController],
-  providers: [UsersService, { provide: AVATAR_STORAGE, useClass: FileSystemAvatarStorage }],
+  providers: [
+    UsersService,
+    UsersExcelService,
+    { provide: AVATAR_STORAGE, useClass: FileSystemAvatarStorage },
+  ],
   exports: [UsersService],
 })
 export class UsersModule {}

@@ -236,13 +236,17 @@ async function readBody(request) {
   }
 }
 
-function taskCard(task) {
-  const {
-    executorIds: _executorIds,
-    managerIds: _managerIds,
-    ...card
-  } = task;
-  return card;
+function isTaskOverdue(task) {
+  return new Date().getTime() > new Date(task.deadline).getTime() && task.status !== 'DONE';
+}
+
+function taskView(task) {
+  return {
+    ...task,
+    isOverdue: isTaskOverdue(task),
+    executorIds: Array.isArray(task.executorIds) ? task.executorIds : [],
+    managerIds: Array.isArray(task.managerIds) ? task.managerIds : [],
+  };
 }
 
 function nextStatus(current, action) {
@@ -372,7 +376,7 @@ const server = http.createServer(async (request, response) => {
         )
       : tasks;
     return sendJson(response, 200, {
-      items: visible.map(taskCard),
+      items: visible.map(taskView),
       meta: {
         page: 1,
         pageSize: 20,
@@ -397,7 +401,7 @@ const server = http.createServer(async (request, response) => {
       managerIds: body.managerIds ?? [],
     };
     tasks = [created, ...tasks];
-    return sendJson(response, 201, created);
+    return sendJson(response, 201, taskView(created));
   }
 
   const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
@@ -407,12 +411,12 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 404, { code: 'NOT_FOUND', message: 'Задача не найдена.' });
     }
     if (method === 'GET') {
-      return sendJson(response, 200, tasks[taskIndex]);
+      return sendJson(response, 200, taskView(tasks[taskIndex]));
     }
     if (method === 'PATCH') {
       const body = await readBody(request);
       tasks[taskIndex] = { ...tasks[taskIndex], ...body };
-      return sendJson(response, 200, tasks[taskIndex]);
+      return sendJson(response, 200, taskView(tasks[taskIndex]));
     }
   }
 
@@ -425,7 +429,7 @@ const server = http.createServer(async (request, response) => {
       executorIds: body.executorIds ?? [],
       managerIds: body.managerIds ?? [],
     };
-    return sendJson(response, 200, tasks[index]);
+    return sendJson(response, 200, taskView(tasks[index]));
   }
 
   const statusMatch = /^\/tasks\/([^/]+)\/status$/.exec(path);
@@ -436,7 +440,7 @@ const server = http.createServer(async (request, response) => {
       ...tasks[index],
       status: nextStatus(tasks[index].status, body.action),
     };
-    return sendJson(response, 200, tasks[index]);
+    return sendJson(response, 200, taskView(tasks[index]));
   }
 
   const taskMessagesMatch = /^\/tasks\/([^/]+)\/messages$/.exec(path);

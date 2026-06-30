@@ -32,6 +32,7 @@ describe('AuthService (Req 5)', () => {
   let findActiveByEmail: jest.Mock;
   let create: jest.Mock;
   let update: jest.Mock;
+  let addEmailToHistory: jest.Mock;
   let runInTransaction: jest.Mock;
   let enqueue: jest.Mock;
   let issue: jest.Mock;
@@ -90,6 +91,9 @@ describe('AuthService (Req 5)', () => {
     findActiveByEmail = jest.fn();
     create = jest.fn();
     update = jest.fn();
+    addEmailToHistory = jest
+      .fn()
+      .mockResolvedValue({ userId: 'user-1', email: 'invitee@example.com' });
     runInTransaction = jest.fn((fn: (tx: unknown) => unknown) => fn({}));
     enqueue = jest.fn().mockResolvedValue(undefined);
     issue = jest.fn().mockResolvedValue('raw-token');
@@ -110,6 +114,7 @@ describe('AuthService (Req 5)', () => {
       findActiveByEmail,
       create,
       update,
+      addEmailToHistory,
       runInTransaction,
       findActiveUserByMaxUserId,
     } as unknown as UserRepository;
@@ -153,15 +158,21 @@ describe('AuthService (Req 5)', () => {
       findByEmail.mockResolvedValue(null);
       create.mockResolvedValue(invited);
 
-      const result = await service.invite('admin-id', 'invitee@example.com');
+      const result = await service.invite('admin-id', 'invitee@example.com', 'Иван Петров');
 
       expect(result).toBe(invited);
       expect(create).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'invitee@example.com',
+          displayName: 'Иван Петров',
           role: Role.EXECUTOR,
           isActive: false,
         }),
+        expect.anything(),
+      );
+      expect(addEmailToHistory).toHaveBeenCalledWith(
+        'user-1',
+        'invitee@example.com',
         expect.anything(),
       );
       expect(issue).toHaveBeenCalledWith('user-1');
@@ -174,7 +185,7 @@ describe('AuthService (Req 5)', () => {
     it('отклоняет приглашение от не-администратора (Req 5.1, 5.2)', async () => {
       findActiveById.mockResolvedValue({ ...invited });
 
-      await expect(service.invite('user-1', 'x@example.com')).rejects.toBeInstanceOf(
+      await expect(service.invite('user-1', 'x@example.com', 'Иван')).rejects.toBeInstanceOf(
         AccessDeniedException,
       );
       expect(create).not.toHaveBeenCalled();
@@ -183,7 +194,7 @@ describe('AuthService (Req 5)', () => {
     it('отклоняет приглашение от неизвестного инициатора', async () => {
       findActiveById.mockResolvedValue(null);
 
-      await expect(service.invite('ghost', 'x@example.com')).rejects.toBeInstanceOf(
+      await expect(service.invite('ghost', 'x@example.com', 'Иван')).rejects.toBeInstanceOf(
         AccessDeniedException,
       );
     });
@@ -191,7 +202,18 @@ describe('AuthService (Req 5)', () => {
     it('отклоняет некорректный адрес электронной почты', async () => {
       findActiveById.mockResolvedValue(admin);
 
-      await expect(service.invite('admin-id', 'bad')).rejects.toBeInstanceOf(ValidationException);
+      await expect(service.invite('admin-id', 'bad', 'Иван')).rejects.toBeInstanceOf(
+        ValidationException,
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('отклоняет пустое имя пользователя', async () => {
+      findActiveById.mockResolvedValue(admin);
+
+      await expect(service.invite('admin-id', 'invitee@example.com', '   ')).rejects.toBeInstanceOf(
+        ValidationException,
+      );
       expect(create).not.toHaveBeenCalled();
     });
 
@@ -199,9 +221,9 @@ describe('AuthService (Req 5)', () => {
       findActiveById.mockResolvedValue(admin);
       findByEmail.mockResolvedValue(invited);
 
-      await expect(service.invite('admin-id', 'invitee@example.com')).rejects.toBeInstanceOf(
-        StateConflictException,
-      );
+      await expect(
+        service.invite('admin-id', 'invitee@example.com', 'Иван'),
+      ).rejects.toBeInstanceOf(StateConflictException);
       expect(create).not.toHaveBeenCalled();
       expect(enqueue).not.toHaveBeenCalled();
     });

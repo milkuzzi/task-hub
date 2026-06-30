@@ -112,6 +112,7 @@ describe('Property 4: Инвариант единственного админи
           return user;
         },
       ),
+      addEmailToHistory: jest.fn(async (userId: string, email: string) => ({ userId, email })),
       update: jest.fn(async (id: string, data: Partial<User>) => {
         const current = store.get(id);
         if (current === undefined) {

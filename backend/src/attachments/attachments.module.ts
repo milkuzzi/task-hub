@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth';
 import { ChatModule } from '../chat';
 import { SecurityModule } from '../security';
-import { AttachmentsController } from './attachments.controller';
+import { AttachmentTicketService } from './attachment-ticket.service';
+import { AttachmentTicketsController, AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
 import { DocumentPreviewService } from './document-preview.service';
 import { PassthroughThumbnailGenerator, THUMBNAIL_GENERATOR } from './thumbnail-generator';
@@ -38,9 +39,10 @@ import { PassthroughThumbnailGenerator, THUMBNAIL_GENERATOR } from './thumbnail-
  */
 @Module({
   imports: [AuthModule, ChatModule, SecurityModule],
-  controllers: [AttachmentsController],
+  controllers: [AttachmentsController, AttachmentTicketsController],
   providers: [
     AttachmentsService,
+    AttachmentTicketService,
     DocumentPreviewService,
     { provide: THUMBNAIL_GENERATOR, useClass: PassthroughThumbnailGenerator },
   ],

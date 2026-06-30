@@ -86,6 +86,20 @@ const AUDIO_MIME_BY_EXTENSION = new Map<string, string>([
   [".weba", "audio/webm"],
   [".webm", "audio/webm"],
 ]);
+const VIDEO_MIME_BY_EXTENSION = new Map<string, string>([
+  [".3g2", "video/3gpp2"],
+  [".3gp", "video/3gpp"],
+  [".3gpp", "video/3gpp"],
+  [".avi", "video/x-msvideo"],
+  [".m4v", "video/mp4"],
+  [".mkv", "video/x-matroska"],
+  [".mov", "video/quicktime"],
+  [".mp4", "video/mp4"],
+  [".mpeg", "video/mpeg"],
+  [".mpg", "video/mpeg"],
+  [".ogv", "video/ogg"],
+  [".webm", "video/webm"],
+]);
 
 const PRESENTATION_MIME_TYPES = new Set<string>([
   "application/vnd.ms-powerpoint",
@@ -147,6 +161,10 @@ function audioMimeTypeByExtension(fileName: string): string | null {
   return AUDIO_MIME_BY_EXTENSION.get(normalizedFileExtension(fileName)) ?? null;
 }
 
+function videoMimeTypeByExtension(fileName: string): string | null {
+  return VIDEO_MIME_BY_EXTENSION.get(normalizedFileExtension(fileName)) ?? null;
+}
+
 /** Форматирует размер файла в человекочитаемый вид (Б/КБ/МБ). */
 export function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) {
@@ -168,8 +186,11 @@ export function isPreviewableImage(mimeType: string): boolean {
 }
 
 /** Определяет, можно ли показать Вложение как видео через нативный браузерный плеер. */
-export function isPreviewableVideo(mimeType: string): boolean {
-  return normalizeMimeType(mimeType).startsWith("video/");
+export function isPreviewableVideo(mimeType: string, fileName = ""): boolean {
+  return (
+    normalizeMimeType(mimeType).startsWith("video/") ||
+    videoMimeTypeByExtension(fileName) !== null
+  );
 }
 
 /** Определяет, можно ли показать Вложение как аудио через нативный браузерный плеер. */
@@ -242,6 +263,18 @@ export type AttachmentPreviewKind =
   | "presentation"
   | "download";
 
+export interface DocumentExternalLinks {
+  preview: {
+    url: string;
+    fileName: string;
+  };
+  original: {
+    url: string;
+    fileName: string;
+  };
+  expiresAt: string;
+}
+
 /** Определяет режим полноэкранного предпросмотра Вложения. */
 export function attachmentPreviewKind(
   attachment: AttachmentMeta,
@@ -249,7 +282,7 @@ export function attachmentPreviewKind(
   if (isPreviewableImage(attachment.mimeType)) {
     return "image";
   }
-  if (isPreviewableVideo(attachment.mimeType)) {
+  if (isPreviewableVideo(attachment.mimeType, attachment.originalName)) {
     return "video";
   }
   if (isPreviewableAudio(attachment.mimeType, attachment.originalName)) {
@@ -279,7 +312,7 @@ export function genericIconType(
   if (normalized.startsWith("image/")) {
     return "image";
   }
-  if (normalized.startsWith("video/")) {
+  if (isPreviewableVideo(mimeType, fileName)) {
     return "video";
   }
   if (normalized.startsWith("audio/")) {
@@ -327,6 +360,7 @@ function resolveContentMimeType(
   }
 
   return (
+    videoMimeTypeByExtension(attachment.originalName) ??
     audioMimeTypeByExtension(attachment.originalName) ??
     "application/octet-stream"
   );
@@ -384,6 +418,21 @@ export function fetchDocumentPreviewBlob(attachmentId: string): Promise<Blob> {
       responseType: "blob",
       timeout: DOCUMENT_PREVIEW_TIMEOUT_MS,
     })
+    .then((response) => response.data);
+}
+
+/**
+ * Получает короткоживущие ссылки на PDF-предпросмотр и оригинал документа.
+ *
+ * Используется MAX mini-app: внешнее открытие через MAX Bridge не может
+ * передать Bearer-токен и выполнить клиентскую распаковку, поэтому backend
+ * выдаёт временные ticket-ссылки.
+ */
+export function fetchDocumentExternalLinks(
+  attachmentId: string,
+): Promise<DocumentExternalLinks> {
+  return http
+    .post<DocumentExternalLinks>(`/attachments/${attachmentId}/document-links`, {})
     .then((response) => response.data);
 }
 

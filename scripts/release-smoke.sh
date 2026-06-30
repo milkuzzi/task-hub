@@ -5,6 +5,7 @@ base_url="${TASKHUB_BASE_URL:-${1:-}}"
 api_prefix="${TASKHUB_API_PREFIX:-/api}"
 require_backup="${TASKHUB_REQUIRE_BACKUP:-1}"
 require_offsite_restic="${TASKHUB_REQUIRE_OFFSITE_RESTIC:-1}"
+metrics_token="${TASKHUB_METRICS_TOKEN:-}"
 
 if [[ -z "$base_url" ]]; then
   echo "Usage: TASKHUB_BASE_URL=https://example.com npm run smoke:release" >&2
@@ -36,7 +37,11 @@ if [[ "$ready_code" != "200" ]]; then
 fi
 grep -q '"status":"ok"' "$body"
 
-metrics="$(curl -fsS "$(api_url /metrics)")"
+metrics_args=()
+if [[ -n "$metrics_token" ]]; then
+  metrics_args=(-H "Authorization: Bearer $metrics_token")
+fi
+metrics="$(curl -fsS "${metrics_args[@]}" "$(api_url /metrics)")"
 grep -q '^taskhub_process_uptime_seconds ' <<<"$metrics"
 
 if [[ "$require_backup" == "1" ]]; then

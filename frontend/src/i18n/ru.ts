@@ -206,6 +206,9 @@ export const ru = {
         maxMobileDocumentUnsupported:
           "В мобильной версии MAX встроенный просмотр документов недоступен. Скачайте оригинальный файл.",
         documentPreview: "Предпросмотр документа",
+        externalDocumentTitle: "Документ готов к просмотру",
+        openPreview: "Предпросмотр",
+        externalLinksExpire: "Ссылки действуют несколько минут.",
         pdfPage: "Страница",
         pdfPageCount: "Страниц: {{count}}",
         pdfRendering: "Подготовка страниц: {{current}} из {{total}}",
@@ -431,9 +434,21 @@ export const ru = {
         success:
           "Приглашение отправлено. Письмо со ссылкой установки пароля направлено пользователю.",
         errors: {
+          name: "Введите имя пользователя от 1 до 200 символов.",
           email:
             "Введите корректный адрес электронной почты (от 6 до 254 символов).",
         },
+      },
+      excel: {
+        export: "Экспорт Excel",
+        import: "Импорт Excel",
+        importLabel: "Файл Excel пользователей",
+        exportError: "Не удалось сформировать Excel-файл пользователей.",
+        importError: "Не удалось импортировать пользователей из Excel.",
+        importSummary:
+          "Импорт завершён: создано {{created}}, обновлено {{updated}}, без изменений {{unchanged}}, ошибок {{failed}}.",
+        rowError: "Строка {{row}}: {{message}}",
+        rowErrorWithEmail: "Строка {{row}} ({{email}}): {{message}}",
       },
       edit: {
         heading: "Изменение учётных данных",

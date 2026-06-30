@@ -1,4 +1,4 @@
-import { IsEmail } from 'class-validator';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 
 /**
  * DTO приглашения нового Пользователя по адресу электронной почты (Req 5.1–5.3).
@@ -12,4 +12,10 @@ export class InviteUserDto {
   /** Адрес электронной почты приглашаемого Пользователя. */
   @IsEmail({}, { message: 'Адрес электронной почты имеет недопустимый формат.' })
   email!: string;
+
+  /** Обязательное отображаемое имя приглашаемого Пользователя. */
+  @IsString({ message: 'Имя пользователя должно быть строкой.' })
+  @MinLength(1, { message: 'Имя пользователя не может быть пустым.' })
+  @MaxLength(200, { message: 'Имя пользователя не должно превышать 200 символов.' })
+  name!: string;
 }

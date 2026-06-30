@@ -21,6 +21,7 @@ describe('UsersService.createPrimaryAdmin (Req 4)', () => {
   let countActiveAdmins: jest.Mock;
   let findByEmail: jest.Mock;
   let create: jest.Mock;
+  let addEmailToHistory: jest.Mock;
   let acquirePrimaryAdminCreationLock: jest.Mock;
   let runInTransaction: jest.Mock;
   let service: UsersService;
@@ -36,6 +37,9 @@ describe('UsersService.createPrimaryAdmin (Req 4)', () => {
     countActiveAdmins = jest.fn();
     findByEmail = jest.fn();
     create = jest.fn();
+    addEmailToHistory = jest
+      .fn()
+      .mockResolvedValue({ userId: 'admin-id', email: 'admin@example.com' });
     acquirePrimaryAdminCreationLock = jest.fn().mockResolvedValue(undefined);
     // Прозрачно выполняет переданную функцию, передавая фиктивный tx-клиент.
     runInTransaction = jest.fn((fn: (tx: unknown) => unknown) => fn({}));
@@ -44,6 +48,7 @@ describe('UsersService.createPrimaryAdmin (Req 4)', () => {
       countActiveAdmins,
       findByEmail,
       create,
+      addEmailToHistory,
       acquirePrimaryAdminCreationLock,
       runInTransaction,
     } as unknown as UserRepository;
@@ -78,6 +83,11 @@ describe('UsersService.createPrimaryAdmin (Req 4)', () => {
 
     expect(result).toBe(fakeAdmin);
     expect(create).toHaveBeenCalledTimes(1);
+    expect(addEmailToHistory).toHaveBeenCalledWith(
+      'admin-id',
+      'admin@example.com',
+      expect.anything(),
+    );
     expect(acquirePrimaryAdminCreationLock).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -675,7 +685,7 @@ describe('UsersService.deleteUser (Req 8)', () => {
 
   it('soft-удаление: помечает запись удалённой, сохраняет её и аннулирует сессии (Req 8.2, 8.6)', async () => {
     const user = makeUser({ id: 'u1', role: Role.EXECUTOR });
-    const { service, store, revokeAllSessions, deleteUser } = buildService({
+    const { service, store, revokeAllSessions, deleteUser, emailHistory } = buildService({
       users: { admin, u1: user },
     });
 
@@ -685,6 +695,7 @@ describe('UsersService.deleteUser (Req 8)', () => {
     expect(store.u1).toBeDefined();
     expect(store.u1?.deletedAt).toBeInstanceOf(Date);
     expect(store.u1?.isActive).toBe(false);
+    expect(emailHistory).toEqual([{ userId: 'u1', email: 'u1@example.com' }]);
     // Жёсткое удаление записи не выполнялось.
     expect(deleteUser).not.toHaveBeenCalled();
     // Сессии аннулированы ≤5с (Req 8.6).

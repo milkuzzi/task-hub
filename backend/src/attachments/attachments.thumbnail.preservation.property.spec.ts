@@ -16,6 +16,7 @@ import { AttachmentsService } from './attachments.service';
 import { ThumbnailGenerator } from './thumbnail-generator';
 import { isPreviewableImage, genericIconType } from './attachment-representation';
 import { AuthenticatedRequest } from '../auth';
+import { AttachmentTicketService } from './attachment-ticket.service';
 
 /**
  * **Bugfix: task-hub-bug-fixes — Property 4 (Preservation): обобщённый значок
@@ -137,7 +138,11 @@ function buildHarness(attachment: Attachment): Harness {
 
   // ChatService не участвует в пути миниатюры — достаточно заглушки.
   const chatService = {} as unknown as ChatService;
-  const controller = new AttachmentsController(chatService, service);
+  const attachmentTickets = {
+    issueDocumentLinks: jest.fn(),
+    openTicket: jest.fn(),
+  } as unknown as AttachmentTicketService;
+  const controller = new AttachmentsController(chatService, service, attachmentTickets);
 
   return { service, controller, setThumbnailPath, thumbnailGenerate };
 }

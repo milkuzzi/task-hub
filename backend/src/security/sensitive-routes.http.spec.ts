@@ -6,6 +6,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Role } from '@prisma/client';
 import request from 'supertest';
 import { AttachmentsController } from '../attachments/attachments.controller';
+import { AttachmentTicketService } from '../attachments/attachment-ticket.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AuthController } from '../auth/auth.controller';
 import { AuthService } from '../auth/auth.service';
@@ -34,6 +35,7 @@ describe('sensitive HTTP routes', () => {
     changePassword: jest.Mock;
   };
   let attachmentsService: { uploadToTask: jest.Mock };
+  let attachmentTicketService: { issueDocumentLinks: jest.Mock; openTicket: jest.Mock };
   let rateLimiter: { check: jest.Mock };
 
   beforeEach(async () => {
@@ -69,6 +71,10 @@ describe('sensitive HTTP routes', () => {
         },
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       }),
+    };
+    attachmentTicketService = {
+      issueDocumentLinks: jest.fn(),
+      openTicket: jest.fn(),
     };
     rateLimiter = {
       check: jest.fn(),
@@ -108,6 +114,7 @@ describe('sensitive HTTP routes', () => {
         },
         { provide: ChatService, useValue: {} },
         { provide: AttachmentsService, useValue: attachmentsService },
+        { provide: AttachmentTicketService, useValue: attachmentTicketService },
       ],
     })
       .overrideGuard(SessionAuthGuard)

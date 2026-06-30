@@ -55,8 +55,8 @@ describe("AttachmentThumbnail", () => {
 
     const img = await screen.findByRole("img", { name: "photo.png" });
     expect(img.getAttribute("src")).toMatch(/^blob:/);
-    expect(screen.queryByText("photo.png")).not.toBeInTheDocument();
-    expect(screen.queryByText("2.0 МБ")).not.toBeInTheDocument();
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(screen.getByRole("button")).toHaveAttribute(
       "title",
       "photo.png · 2.0 МБ",
@@ -73,7 +73,8 @@ describe("AttachmentThumbnail", () => {
     await waitFor(() =>
       expect(screen.queryByRole("img")).not.toBeInTheDocument(),
     );
-    expect(screen.queryByText("photo.png")).not.toBeInTheDocument();
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(screen.getByRole("button")).toHaveAttribute(
       "title",
       "photo.png · 2.0 МБ",
@@ -93,7 +94,8 @@ describe("AttachmentThumbnail", () => {
     );
 
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.queryByText("doc.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("doc.pdf")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(screen.getByRole("button")).toHaveAttribute(
       "title",
       "doc.pdf · 2.0 МБ",
@@ -122,6 +124,8 @@ describe("AttachmentThumbnail", () => {
       "title",
       "report.xlsx · 2.0 МБ",
     );
+    expect(screen.getByText("report.xlsx")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(mockedFetchThumbnail).not.toHaveBeenCalled();
     expect(mockedOpenAttachment).not.toHaveBeenCalled();
   });
@@ -143,6 +147,8 @@ describe("AttachmentThumbnail", () => {
       "title",
       "brief.docx · 2.0 МБ",
     );
+    expect(screen.getByText("brief.docx")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(mockedFetchThumbnail).not.toHaveBeenCalled();
     expect(mockedOpenAttachment).not.toHaveBeenCalled();
   });
@@ -164,8 +170,43 @@ describe("AttachmentThumbnail", () => {
       "title",
       "roadmap.pptx · 2.0 МБ",
     );
+    expect(screen.getByText("roadmap.pptx")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(mockedFetchThumbnail).not.toHaveBeenCalled();
     expect(mockedOpenAttachment).not.toHaveBeenCalled();
+  });
+
+  it("показывает видео-превью для видео с неточным MIME по расширению", async () => {
+    const revoke = vi.fn();
+    mockedOpenAttachment.mockResolvedValue({
+      url: "blob:video-thumbnail",
+      blob: new Blob(["video"], { type: "video/mp4" }),
+      mimeType: "video/mp4",
+      integrityOk: true,
+      revoke,
+    });
+
+    const { container, unmount } = render(
+      <AttachmentThumbnail
+        attachment={meta({
+          mimeType: "application/octet-stream",
+          originalName: "clip.mp4",
+          hasThumbnail: false,
+        })}
+        onOpen={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(mockedOpenAttachment).toHaveBeenCalledTimes(1));
+    const video = container.querySelector("video.attachment-tile__video");
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute("src", "blob:video-thumbnail");
+    expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
+    expect(mockedFetchThumbnail).not.toHaveBeenCalled();
+
+    unmount();
+    expect(revoke).toHaveBeenCalledTimes(1);
   });
 
   it("рисует аудио-плеер для audio-файла без запроса миниатюры", async () => {
@@ -196,6 +237,8 @@ describe("AttachmentThumbnail", () => {
     expect(
       container.querySelector(".attachment-tile--audio-player"),
     ).toHaveAttribute("title", "voice.mp3 · 2.0 МБ");
+    expect(screen.getByText("voice.mp3")).toBeInTheDocument();
+    expect(screen.getByText("2.0 МБ")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(mockedFetchThumbnail).not.toHaveBeenCalled();

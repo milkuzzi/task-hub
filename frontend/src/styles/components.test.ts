@@ -134,13 +134,29 @@ describe("Структурные правила компонентов в global
     });
 
     it("кнопка редактирования в hero выровнена по высоте со статусными контролами", () => {
+      const actionRow = ruleBody(css, ".task-hero__action-row");
+      expect(declValue(actionRow, "grid-template-columns")).toBe(
+        "repeat(3, minmax(0, 1fr))",
+      );
+      expect(declValue(actionRow, "align-items")).toBe("stretch");
+      expect(
+        declValue(
+          ruleBody(css, ".task-hero__action-row .status-strip__controls--with-select"),
+          "grid-template-columns",
+        ),
+      ).toBe("repeat(2, minmax(0, 1fr))");
       expect(
         /(?:^|})\s*\.task-hero__edit\s*\{[^}]*min-height\s*:\s*40px;/s.test(
           css,
         ),
+      ).toBe(false);
+      expect(
+        /(?:^|})\s*\.task-hero__edit\s*\{[^}]*min-height\s*:\s*44px;/s.test(
+          css,
+        ),
       ).toBe(true);
       expect(
-        /(?:^|})\s*\.task-hero__edit\s*\{[^}]*align-self\s*:\s*start;/s.test(
+        /(?:^|})\s*\.task-hero__edit\s*\{[^}]*align-self\s*:\s*stretch;/s.test(
           css,
         ),
       ).toBe(true);

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowSquareOut, FilePdf } from "@phosphor-icons/react";
 import {
   attachmentPreviewKind,
+  fetchDocumentExternalLinks,
   fetchDocumentPreviewBlob,
   formatAttachmentSize,
   openAttachment,
   type AttachmentPreviewKind,
+  type DocumentExternalLinks,
 } from "@/lib/attachments";
 import type { AttachmentMeta } from "@/lib/chat-api";
 import { useFocusTrap } from "./useFocusTrap";
@@ -19,24 +22,17 @@ function usesPdfDocumentPreview(previewKind: AttachmentPreviewKind): boolean {
   );
 }
 
-function isLikelyMobileMaxWebView(surface: "site" | "max"): boolean {
-  if (surface !== "max" || typeof navigator === "undefined") {
-    return false;
-  }
+function absoluteDocumentUrl(value: string): string {
+  return new URL(value, window.location.origin).toString();
+}
 
-  const userAgent = navigator.userAgent.toLowerCase();
-  if (/android|iphone|ipad|ipod|mobile/.test(userAgent)) {
-    return true;
-  }
-
-  if (typeof window === "undefined" || window.matchMedia === undefined) {
-    return false;
-  }
-
-  return (
-    window.matchMedia("(pointer: coarse)").matches &&
-    window.matchMedia("(max-width: 820px)").matches
-  );
+function triggerBrowserDownload(href: string, fileName: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 /**
@@ -67,6 +63,8 @@ export function AttachmentViewer({
 }: AttachmentViewerProps): JSX.Element | null {
   const { t } = useTranslation();
   const [url, setUrl] = useState<string | null>(null);
+  const [documentLinks, setDocumentLinks] =
+    useState<DocumentExternalLinks | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [integrityOk, setIntegrityOk] = useState(true);
@@ -89,8 +87,11 @@ export function AttachmentViewer({
     let revoked = false;
     let revoke: (() => void) | null = null;
     const previewKind = attachmentPreviewKind(attachment);
+    const documentPreview = usesPdfDocumentPreview(previewKind);
+    const maxExternalDocumentPreview = documentPreview && surface === "max";
 
     setUrl(null);
+    setDocumentLinks(null);
     setError(null);
     setIntegrityOk(true);
     setLoading(false);
@@ -100,12 +101,30 @@ export function AttachmentViewer({
       return;
     }
 
-    if (usesPdfDocumentPreview(previewKind) && isLikelyMobileMaxWebView(surface)) {
-      return;
-    }
-
     setLoading(true);
-    if (usesPdfDocumentPreview(previewKind)) {
+    if (documentPreview) {
+      if (maxExternalDocumentPreview) {
+        fetchDocumentExternalLinks(attachment.id)
+          .then((links) => {
+            if (!revoked) {
+              setDocumentLinks(links);
+            }
+          })
+          .catch(() => {
+            if (!revoked) {
+              setError(t("attachment.viewer.error"));
+            }
+          })
+          .finally(() => {
+            if (!revoked) {
+              setLoading(false);
+            }
+          });
+        return () => {
+          revoked = true;
+        };
+      }
+
       fetchDocumentPreviewBlob(attachment.id)
         .then((blob) => {
           if (revoked) {
@@ -169,8 +188,19 @@ export function AttachmentViewer({
 
   const previewKind = attachmentPreviewKind(attachment);
   const documentPreview = usesPdfDocumentPreview(previewKind);
-  const maxMobileDocumentFallback =
-    documentPreview && isLikelyMobileMaxWebView(surface);
+  const maxExternalDocumentPreview = documentPreview && surface === "max";
+
+  const handleOpenPreviewLink = (): void => {
+    if (documentLinks === null) {
+      return;
+    }
+    const href = absoluteDocumentUrl(documentLinks.preview.url);
+    if (surface === "max" && typeof window.WebApp?.openLink === "function") {
+      window.WebApp.openLink(href);
+      return;
+    }
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
 
   /**
    * Скачивает Вложение через авторизованный клиент с распаковкой на стороне
@@ -186,6 +216,19 @@ export function AttachmentViewer({
     setDownloading(true);
     let revoke: (() => void) | null = null;
     try {
+      if (documentLinks !== null) {
+        const href = absoluteDocumentUrl(documentLinks.original.url);
+        if (
+          surface === "max" &&
+          typeof window.WebApp?.downloadFile === "function"
+        ) {
+          await window.WebApp.downloadFile(href, documentLinks.original.fileName);
+        } else {
+          triggerBrowserDownload(href, documentLinks.original.fileName);
+        }
+        return;
+      }
+
       let href = documentPreview ? null : url;
       if (href === null) {
         const result = await openAttachment(attachment);
@@ -210,7 +253,15 @@ export function AttachmentViewer({
   };
 
   return (
-    <div className="viewer-overlay" role="presentation" onClick={onClose}>
+    <div
+      className={
+        surface === "max"
+          ? "viewer-overlay viewer-overlay--max"
+          : "viewer-overlay"
+      }
+      role="presentation"
+      onClick={onClose}
+    >
       <div
         ref={dialogRef}
         className="viewer"
@@ -247,7 +298,9 @@ export function AttachmentViewer({
         <div
           className={
             documentPreview
-              ? "viewer__body viewer__body--document"
+              ? maxExternalDocumentPreview
+                ? "viewer__body viewer__body--document viewer__body--document-external"
+                : "viewer__body viewer__body--document"
               : "viewer__body"
           }
         >
@@ -282,25 +335,35 @@ export function AttachmentViewer({
               preload="metadata"
             />
           )}
-          {maxMobileDocumentFallback && error === null && (
-            <div className="viewer__document-fallback">
-              <p className="text-muted">
-                {t("attachment.viewer.maxMobileDocumentUnsupported")}
-              </p>
-              <button
-                className="btn btn--primary"
-                type="button"
-                disabled={downloading}
-                aria-busy={downloading}
-                onClick={() => void handleDownload()}
-              >
-                {downloading
-                  ? t("attachment.viewer.loading")
-                  : t("attachment.download")}
-              </button>
-            </div>
+          {maxExternalDocumentPreview && documentLinks !== null && (
+            <section
+              className="viewer__document-actions"
+              aria-label={t("attachment.viewer.documentPreview")}
+            >
+              <FilePdf
+                className="viewer__document-actions-icon"
+                size={40}
+                aria-hidden="true"
+              />
+              <span className="viewer__document-actions-title">
+                {t("attachment.viewer.externalDocumentTitle")}
+              </span>
+              <div className="viewer__document-action-list">
+                <button
+                  className="btn btn--primary viewer__document-action-button"
+                  type="button"
+                  onClick={handleOpenPreviewLink}
+                >
+                  <ArrowSquareOut size={18} aria-hidden="true" />
+                  {t("attachment.viewer.openPreview")}
+                </button>
+              </div>
+              <span className="viewer__document-actions-note">
+                {t("attachment.viewer.externalLinksExpire")}
+              </span>
+            </section>
           )}
-          {documentPreview && !maxMobileDocumentFallback && url !== null && (
+          {documentPreview && !maxExternalDocumentPreview && url !== null && (
             <iframe
               className="viewer__document-frame"
               src={url}

@@ -5,6 +5,7 @@ import { AuthService, SessionAuthGuard, AuthenticatedRequest } from '../auth';
 import { ClockService } from '../clock';
 import { UserRepository } from '../repositories';
 import { UsersController } from './users.controller';
+import { UsersExcelService } from './users-excel.service';
 import { UsersService } from './users.service';
 
 /**
@@ -42,6 +43,8 @@ describe('UsersController', () => {
         'transferAdmin' | 'restoreUser' | 'updateProfile' | 'setAvatar' | 'deleteUser'
       >
     >;
+    authService: jest.Mocked<Pick<AuthService, 'invite'>>;
+    usersExcel: jest.Mocked<Pick<UsersExcelService, 'exportUsers' | 'importUsers'>>;
     userRepository: {
       listActiveWithMaxLink: jest.Mock;
       listDeletedWithEmails: jest.Mock;
@@ -62,12 +65,32 @@ describe('UsersController', () => {
       >
     >;
 
+    const authService = {
+      invite: jest.fn().mockResolvedValue({ ...adminUserRow, id: 'u1' }),
+    } as unknown as jest.Mocked<Pick<AuthService, 'invite'>>;
+
+    const usersExcel = {
+      exportUsers: jest.fn().mockResolvedValue({
+        filename: 'users.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        content: Buffer.from('xlsx'),
+      }),
+      importUsers: jest.fn().mockResolvedValue({
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        failed: 0,
+        errors: [],
+      }),
+    } as unknown as jest.Mocked<Pick<UsersExcelService, 'exportUsers' | 'importUsers'>>;
+
     const userRepository = {
       listActiveWithMaxLink: jest.fn().mockResolvedValue([adminUserRow]),
       listDeletedWithEmails: jest.fn().mockResolvedValue([
         {
           ...adminUserRow,
           id: 'd1',
+          avatarPath: 'avatars/d1/avatar.png',
           deletedAt: new Date('2026-06-10T00:00:00.000Z'),
           updatedAt: NOW,
           emails: [{ email: 'old@example.com' }, { email: 'older@example.com' }],
@@ -79,8 +102,9 @@ describe('UsersController', () => {
     const clock = { now: () => NOW } as unknown as ClockService;
 
     const controller = new UsersController(
-      {} as unknown as AuthService,
+      authService as unknown as AuthService,
       usersService as unknown as UsersService,
+      usersExcel as unknown as UsersExcelService,
       userRepository as unknown as UserRepository,
       clock,
     );
@@ -89,7 +113,7 @@ describe('UsersController', () => {
       user: { userId: opts.userId ?? 'admin-1', tokenId: 't1', role: opts.role ?? Role.ADMIN },
     } as AuthenticatedRequest;
 
-    return { controller, usersService, userRepository, req };
+    return { controller, usersService, authService, usersExcel, userRepository, req };
   }
 
   function withMultipartAvatar(
@@ -131,6 +155,20 @@ describe('UsersController', () => {
     const { controller, usersService, req } = buildController();
     await controller.transferAdmin('u1', req);
     expect(usersService.transferAdmin).toHaveBeenCalledWith('admin-1', 'u1');
+  });
+
+  it('приглашает пользователя с обязательным именем', async () => {
+    const { controller, authService, req } = buildController();
+    const view = await controller.invite(
+      { email: 'new@example.com', name: 'Новый пользователь' },
+      req,
+    );
+    expect(authService.invite).toHaveBeenCalledWith(
+      'admin-1',
+      'new@example.com',
+      'Новый пользователь',
+    );
+    expect(view.id).toBe('u1');
   });
 
   it('отображает name → displayName при обновлении профиля (Req 6.3)', async () => {
@@ -192,6 +230,7 @@ describe('UsersController', () => {
     const { controller, req } = buildController();
     const list = await controller.listDeleted(req);
     expect(list).toHaveLength(1);
+    expect(list[0]?.avatarPath).toBe('avatars/d1/avatar.png');
     expect(list[0]?.emails).toEqual(['old@example.com', 'older@example.com']);
   });
 

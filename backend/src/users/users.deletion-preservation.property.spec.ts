@@ -141,6 +141,7 @@ describe('Property 20: Сохранность сообщений и отобра
         }
         return removed;
       }),
+      addEmailToHistory: jest.fn(async () => undefined),
       runInTransaction: jest.fn(async (fn: (tx: unknown) => unknown) => {
         const backup = snapshot();
         try {

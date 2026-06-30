@@ -1,5 +1,15 @@
 export { UsersService } from './users.service';
+export {
+  UsersExcelService,
+  type UsersImportResult,
+  type UsersExcelFile,
+} from './users-excel.service';
 export { UsersModule } from './users.module';
+export {
+  validateDisplayName,
+  DISPLAY_NAME_MIN_LENGTH,
+  DISPLAY_NAME_MAX_LENGTH,
+} from './display-name';
 export { hasManagerPrivileges, hasAdminPrivileges, roleAtLeast } from './permissions';
 export {
   validatePrimaryAdminEmail,

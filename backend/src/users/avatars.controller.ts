@@ -37,7 +37,7 @@ export class AvatarsController {
   /**
    * Потоковая отдача аватара Пользователя по идентификатору (Req 6.4, 19.8).
    *
-   * Находит активного Пользователя и его `avatarPath`; при отсутствии записи,
+   * Находит Пользователя и его `avatarPath`; при отсутствии записи,
    * отсутствии аватара или недоступности файла возвращает 404
    * ({@link EntityNotFoundException}). Содержимое читается из хранилища вне
    * веб-корня и отдаётся как {@link StreamableFile} с MIME-типом, выведенным из
@@ -52,7 +52,7 @@ export class AvatarsController {
     // Требуется действующая Сессия (любой Пользователь вправе видеть аватары).
     this.principal(req);
 
-    const user = await this.userRepository.findActiveById(userId);
+    const user = await this.userRepository.findById(userId);
     if (user === null || user.avatarPath === null || user.avatarPath === '') {
       throw new EntityNotFoundException('Аватар не найден.');
     }

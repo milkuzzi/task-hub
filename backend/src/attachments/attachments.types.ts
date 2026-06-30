@@ -80,6 +80,37 @@ export interface DocumentPreview {
   fileName: string;
 }
 
+/** Распакованное исходное Вложение для внешнего скачивания/открытия. */
+export interface OriginalAttachmentContent {
+  /** Байты исходного файла после серверной распаковки. */
+  content: Buffer;
+  /** MIME-тип исходного файла. */
+  mimeType: string;
+  /** Исходное имя файла. */
+  fileName: string;
+}
+
+/** Метаданные ссылок на документ, доступные после проверки прав. */
+export interface DocumentLinkDescriptor {
+  /** Имя PDF-предпросмотра, полученного через LibreOffice. */
+  previewFileName: string;
+  /** Исходное имя файла. */
+  originalFileName: string;
+}
+
+/** Временные внешние ссылки на документ для MAX mini-app. */
+export interface DocumentExternalLinks {
+  preview: {
+    url: string;
+    fileName: string;
+  };
+  original: {
+    url: string;
+    fileName: string;
+  };
+  expiresAt: string;
+}
+
 /**
  * Результат загрузки Вложения в Чат Задачи до отправки Сообщения (Req 12.1–12.5).
  *

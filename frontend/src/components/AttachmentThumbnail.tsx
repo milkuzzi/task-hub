@@ -79,6 +79,33 @@ function fileIconLabel(icon: GenericIconType): string {
   }
 }
 
+function AttachmentDetails({
+  name,
+  sizeBytes,
+}: {
+  name: string;
+  sizeBytes: number;
+}): JSX.Element {
+  return (
+    <span className="attachment-tile__details">
+      <span className="attachment-tile__name">{name}</span>
+      <span className="attachment-tile__size">
+        {formatAttachmentSize(sizeBytes)}
+      </span>
+    </span>
+  );
+}
+
+function revealFirstVideoFrame(video: HTMLVideoElement): void {
+  try {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      video.currentTime = Math.min(0.1, video.duration / 2);
+    }
+  } catch {
+    // Некоторые мобильные WebView запрещают seek до полной готовности файла.
+  }
+}
+
 function VideoPreview({
   attachment,
   fallbackIcon,
@@ -131,6 +158,8 @@ function VideoPreview({
         muted
         playsInline
         preload="metadata"
+        onLoadedMetadata={(event) => revealFirstVideoFrame(event.currentTarget)}
+        onError={() => setFailed(true)}
       />
       <span className="attachment-tile__play" aria-hidden="true" />
     </>
@@ -248,6 +277,10 @@ export function AttachmentThumbnail({
             })}
           />
         </span>
+        <AttachmentDetails
+          name={attachment.originalName}
+          sizeBytes={attachment.sizeBytes}
+        />
       </span>
     );
   }
@@ -274,6 +307,10 @@ export function AttachmentThumbnail({
           <FallbackIcon icon={fallbackIcon} />
         )}
       </span>
+      <AttachmentDetails
+        name={attachment.originalName}
+        sizeBytes={attachment.sizeBytes}
+      />
     </button>
   );
 }

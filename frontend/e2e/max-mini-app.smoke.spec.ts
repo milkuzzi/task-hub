@@ -2,12 +2,24 @@ import { expect, test, type Page } from '@playwright/test';
 
 const DEEP_LINK_TASK_ID = '22222222-2222-4222-8222-222222222222';
 const MINI_APP_TOKEN = 'mini-app-session-token';
+const OFFICE_ATTACHMENT_ID = '44444444-4444-4444-8444-444444444444';
 const directory = Array.from({ length: 8 }, (_, index) => ({
   id: `33333333-3333-4333-8333-${String(index + 1).padStart(12, '0')}`,
   email: `user${index + 1}@example.com`,
   name: `Участник ${index + 1}`,
   role: index % 2 === 0 ? 'EXECUTOR' : 'MANAGER',
 }));
+const officeAttachment = {
+  id: OFFICE_ATTACHMENT_ID,
+  messageId: '55555555-5555-4555-8555-555555555555',
+  originalName: 'report.xlsx',
+  mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  sizeBytes: 8192,
+  hasThumbnail: false,
+  compression: 'zstd',
+  checksum: 'abc123',
+  createdAt: '2026-06-29T09:00:00.000Z',
+};
 
 async function installMaxBridge(page: Page, startParam?: string): Promise<void> {
   const initData = new URLSearchParams({
@@ -24,6 +36,19 @@ async function installMaxBridge(page: Page, startParam?: string): Promise<void> 
         hide() {},
         onClick() {},
         offClick() {},
+      },
+      openLink(url: string) {
+        (window as typeof window & { __maxOpenLink?: string }).__maxOpenLink = url;
+      },
+      downloadFile(url: string, file_name: string) {
+        const target = window as typeof window & {
+          __maxDownloads?: Array<{ url: string; fileName: string }>;
+        };
+        target.__maxDownloads = [
+          ...(target.__maxDownloads ?? []),
+          { url, fileName: file_name },
+        ];
+        return Promise.resolve({});
       },
     };
   }, initData);
@@ -76,16 +101,37 @@ test.describe('@smoke MAX mini-app', () => {
         return;
       }
       if (
-        path === `/api/tasks/${DEEP_LINK_TASK_ID}/messages` ||
-        path === `/api/tasks/${DEEP_LINK_TASK_ID}/attachments`
+        path === `/api/tasks/${DEEP_LINK_TASK_ID}/messages`
       ) {
         expectMiniAppAuthorization();
         await route.fulfill({ json: [] });
         return;
       }
+      if (path === `/api/tasks/${DEEP_LINK_TASK_ID}/attachments`) {
+        expectMiniAppAuthorization();
+        await route.fulfill({ json: [officeAttachment] });
+        return;
+      }
       if (path === `/api/tasks/${DEEP_LINK_TASK_ID}/max-notifications`) {
         expectMiniAppAuthorization();
         await route.fulfill({ json: { muted: false } });
+        return;
+      }
+      if (path === `/api/attachments/${OFFICE_ATTACHMENT_ID}/document-links`) {
+        expectMiniAppAuthorization();
+        await route.fulfill({
+          json: {
+            preview: {
+              url: '/api/attachment-tickets/preview-token',
+              fileName: 'report.pdf',
+            },
+            original: {
+              url: '/api/attachment-tickets/original-token',
+              fileName: 'report.xlsx',
+            },
+            expiresAt: '2026-06-30T10:05:00.000Z',
+          },
+        });
         return;
       }
       if (path.endsWith('/tasks')) {
@@ -150,6 +196,38 @@ test.describe('@smoke MAX mini-app', () => {
 
     await expect(page).toHaveURL(new RegExp(`/max/tasks/${DEEP_LINK_TASK_ID}$`));
     await expect(page.getByRole('heading', { name: 'Задача по ссылке' })).toBeVisible();
+  });
+
+  test('renders LibreOffice-supported attachments in MAX as external actions', async ({ page }) => {
+    await installMaxBridge(page, `task_${DEEP_LINK_TASK_ID}`);
+    await page.goto(`/max?WebAppStartParam=task_${DEEP_LINK_TASK_ID}`);
+
+    await page.getByRole('tab', { name: 'Вложения' }).click();
+    await expect(page.getByText('report.xlsx')).toBeVisible();
+    await expect(page.getByText('8.0 КБ')).toBeVisible();
+    await page.getByRole('button', { name: 'Открыть: report.xlsx' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Просмотр вложения' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('iframe')).toHaveCount(0);
+    await expect(dialog.locator('.pdf-document-viewer__canvas')).toHaveCount(0);
+    await expect(dialog.getByText('Документ готов к просмотру')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Предпросмотр' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Скачать PDF' })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Скачать оригинал' })).toHaveCount(0);
+
+    await dialog.getByRole('button', { name: 'Предпросмотр' }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as typeof window & { __maxOpenLink?: string }).__maxOpenLink),
+      )
+      .toContain('/api/attachment-tickets/preview-token');
+
+    const geometry = await page.evaluate(() => ({
+      noHorizontalOverflow:
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    }));
+    expect(geometry.noHorizontalOverflow).toBe(true);
   });
 
   test('keeps the create-task dialog inside the viewport with stable actions', async ({ page }) => {

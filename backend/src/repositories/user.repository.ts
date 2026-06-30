@@ -131,7 +131,7 @@ export class UserRepository extends BaseRepository {
    * PostgreSQL. Блокировка освобождается автоматически при commit/rollback.
    */
   async acquirePrimaryAdminCreationLock(tx: Prisma.TransactionClient): Promise<void> {
-    await tx.$queryRawUnsafe(
+    await tx.$executeRawUnsafe(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       UserRepository.PRIMARY_ADMIN_LOCK_KEY,
     );

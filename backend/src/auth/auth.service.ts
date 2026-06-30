@@ -14,6 +14,7 @@ import { SessionRegistry } from '../infra';
 import { MailerService } from '../mailer';
 import { MAX_OAUTH_PORT, MaxOAuthExchangeError, type MaxOAuthPort } from '../max/oauth';
 import { UserRepository } from '../repositories';
+import { validateDisplayName } from '../users/display-name';
 import { validatePrimaryAdminEmail } from '../users/email-validation';
 import { PasswordSetupTokenService } from './password-setup-token.service';
 import { PasswordService } from './password.service';
@@ -110,39 +111,44 @@ export class AuthService {
    *
    * @param adminId Идентификатор Администратора-инициатора.
    * @param email Адрес электронной почты приглашаемого Пользователя.
+   * @param displayName Отображаемое имя приглашаемого Пользователя.
    * @returns Созданная неактивная учётная запись.
    * @throws AccessDeniedException Если инициатор не является активным Администратором.
    * @throws ValidationException При недопустимом адресе электронной почты.
    * @throws StateConflictException Если адрес уже занят другой учётной записью.
    */
-  async invite(adminId: string, email: string): Promise<User> {
+  async invite(adminId: string, email: string, displayName: string): Promise<User> {
     const admin = await this.userRepository.findActiveById(adminId);
     if (admin === null || admin.role !== Role.ADMIN) {
       throw new AccessDeniedException('Приглашать Пользователей может только Администратор.');
     }
 
-    const validation = validatePrimaryAdminEmail(email);
+    const normalizedEmail = email.trim();
+    const validation = validatePrimaryAdminEmail(normalizedEmail);
     if (!validation.valid) {
       throw new ValidationException(validation.reason);
     }
+    const normalizedDisplayName = validateDisplayName(displayName);
 
     const user = await this.userRepository.runInTransaction(async (tx) => {
-      const existing = await this.userRepository.findByEmail(email, tx);
+      const existing = await this.userRepository.findByEmail(normalizedEmail, tx);
       if (existing !== null) {
         throw new StateConflictException(
           'Адрес электронной почты уже используется другой учётной записью.',
         );
       }
 
-      return this.userRepository.create(
+      const created = await this.userRepository.create(
         {
-          email,
-          displayName: email,
+          email: normalizedEmail,
+          displayName: normalizedDisplayName,
           role: Role.EXECUTOR,
           isActive: false,
         },
         tx,
       );
+      await this.userRepository.addEmailToHistory(created.id, normalizedEmail, tx);
+      return created;
     });
 
     const token = await this.setupTokens.issue(user.id);

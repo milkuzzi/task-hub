@@ -58,6 +58,8 @@ export interface DeletedUserView {
   id: string;
   /** Отображаемое имя на момент удаления (Req 8.4). */
   name: string;
+  /** Относительный путь до аватара либо `null`. */
+  avatarPath: string | null;
   /** Сохранённые адреса для выбора при восстановлении (Req 7.1, 7.3). */
   emails: string[];
   /** Момент удаления (ISO-8601, UTC). */
@@ -126,6 +128,7 @@ export function toDeletedUser(user: UserWithEmails): DeletedUserView {
   return {
     id: user.id,
     name: user.displayName,
+    avatarPath: user.avatarPath,
     emails: user.emails.map((e) => e.email),
     deletedAt: (user.deletedAt ?? user.updatedAt).toISOString(),
   };

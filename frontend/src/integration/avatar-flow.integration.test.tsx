@@ -5,7 +5,12 @@ import { AdminUsersPage } from '@/pages/AdminUsersPage';
 import { ChatMessageItem } from '@/components/ChatMessageItem';
 import { AuthContext, type AuthContextValue } from '@/lib/use-auth';
 import { fetchAvatarBlob } from '@/lib/avatar';
-import { listUsers, listDeletedUsers, type AdminUser } from '@/lib/users-api';
+import {
+  listUsers,
+  listDeletedUsers,
+  type AdminUser,
+  type DeletedUser,
+} from '@/lib/users-api';
 import type { CurrentUser } from '@/lib/auth-api';
 import type { ChatMessage } from '@/lib/chat-api';
 
@@ -190,6 +195,17 @@ describe('Поток аватаров: администрирование пок
     };
   }
 
+  function deletedUser(overrides: Partial<DeletedUser> = {}): DeletedUser {
+    return {
+      id: 'deleted-with-avatar',
+      name: 'Удалённый с аватаром',
+      avatarPath: 'avatars/deleted-with-avatar/avatar.png',
+      emails: ['deleted@example.com'],
+      deletedAt: '2026-06-10T09:15:00.000Z',
+      ...overrides,
+    };
+  }
+
   function currentAdmin(): CurrentUser {
     return {
       id: 'admin-1',
@@ -253,5 +269,22 @@ describe('Поток аватаров: администрирование пок
         }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it('строка удалённого Пользователя показывает сохранённый аватар', async () => {
+    mockedFetchAvatar.mockResolvedValue(new Blob(['deleted-avatar'], { type: 'image/png' }));
+    mockedListUsers.mockResolvedValue([]);
+    mockedListDeleted.mockResolvedValue([deletedUser()]);
+
+    renderPage();
+
+    const deletedRow = (await screen.findByText('deleted@example.com')).closest('li');
+    expect(deletedRow).not.toBeNull();
+
+    await waitFor(() => expect(mockedFetchAvatar).toHaveBeenCalledWith('deleted-with-avatar'));
+    const avatarImg = await within(deletedRow as HTMLElement).findByRole('img', {
+      name: 'Аватар пользователя',
+    });
+    expect(avatarImg.getAttribute('src')).toMatch(/^blob:/);
   });
 });

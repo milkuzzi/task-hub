@@ -1,10 +1,12 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminUsersPage } from "./AdminUsersPage";
 import { AuthContext, type AuthContextValue } from "@/lib/use-auth";
 import type { CurrentUser } from "@/lib/auth-api";
 import {
+  importUsers,
+  inviteUser,
   listDeletedUsers,
   listUsers,
   transferAdmin,
@@ -17,6 +19,8 @@ vi.mock("@/lib/users-api", async () => {
     await vi.importActual<typeof import("@/lib/users-api")>("@/lib/users-api");
   return {
     ...actual,
+    importUsers: vi.fn(),
+    inviteUser: vi.fn(),
     listUsers: vi.fn(),
     listDeletedUsers: vi.fn(),
     transferAdmin: vi.fn(),
@@ -26,6 +30,8 @@ vi.mock("@/lib/users-api", async () => {
 const mockedListUsers = vi.mocked(listUsers);
 const mockedListDeletedUsers = vi.mocked(listDeletedUsers);
 const mockedTransferAdmin = vi.mocked(transferAdmin);
+const mockedInviteUser = vi.mocked(inviteUser);
+const mockedImportUsers = vi.mocked(importUsers);
 
 const currentAdmin: CurrentUser = {
   id: "admin-1",
@@ -50,6 +56,22 @@ beforeEach(() => {
   mockedListUsers.mockResolvedValue({} as never);
   mockedListDeletedUsers.mockResolvedValue([]);
   mockedTransferAdmin.mockResolvedValue();
+  mockedInviteUser.mockResolvedValue({
+    id: "new-1",
+    email: "new@example.com",
+    name: "Новый пользователь",
+    role: "EXECUTOR",
+    active: false,
+    locked: false,
+    maxLinked: false,
+  });
+  mockedImportUsers.mockResolvedValue({
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    failed: 0,
+    errors: [],
+  });
 });
 
 afterEach(() => {
@@ -137,6 +159,69 @@ describe("AdminUsersPage — защита API-контракта", () => {
     expect(
       screen.getByRole("button", { name: "Изменить аватар" }),
     ).toBeInTheDocument();
+  });
+
+  it("приглашает пользователя только с именем и email", async () => {
+    const user = userEvent.setup();
+    mockedListUsers.mockResolvedValue([]);
+    mockedListDeletedUsers.mockResolvedValue([]);
+
+    render(
+      <AuthContext.Provider value={authValue}>
+        <AdminUsersPage />
+      </AuthContext.Provider>,
+    );
+
+    await screen.findByRole("heading", { name: "Пригласить пользователя" });
+    await user.click(screen.getByRole("button", { name: "Пригласить" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Введите имя пользователя");
+
+    await user.type(screen.getByLabelText("Имя"), "Новый пользователь");
+    await user.type(
+      screen.getByLabelText("Электронная почта"),
+      "new@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Пригласить" }));
+
+    await waitFor(() =>
+      expect(mockedInviteUser).toHaveBeenCalledWith({
+        email: "new@example.com",
+        name: "Новый пользователь",
+      }),
+    );
+  });
+
+  it("импортирует Excel-файл и показывает результат по строкам", async () => {
+    mockedListUsers.mockResolvedValue([]);
+    mockedListDeletedUsers.mockResolvedValue([]);
+    mockedImportUsers.mockResolvedValue({
+      created: 1,
+      updated: 1,
+      unchanged: 0,
+      failed: 1,
+      errors: [{ row: 4, email: "bad", message: "Некорректный email" }],
+    });
+
+    const { container } = render(
+      <AuthContext.Provider value={authValue}>
+        <AdminUsersPage />
+      </AuthContext.Provider>,
+    );
+
+    await screen.findByRole("button", { name: "Импорт Excel" });
+    const input = container.querySelector<HTMLInputElement>(
+      'input[type="file"][accept*=".xlsx"]',
+    );
+    expect(input).not.toBeNull();
+    const file = new File(["xlsx"], "users.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() => expect(mockedImportUsers).toHaveBeenCalledWith(file));
+    expect(await screen.findByText(/создано 1, обновлено 1/u)).toBeInTheDocument();
+    expect(screen.getByText(/Строка 4 \(bad\): Некорректный email/u)).toBeInTheDocument();
   });
 
   it("ищет активных и удалённых пользователей по имени и email", async () => {

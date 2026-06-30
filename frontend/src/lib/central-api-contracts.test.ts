@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, http } from './api';
 import { listNotifications } from './notifications-api';
 import { computeStatistics } from './statistics-api';
-import { listDeletedUsers, listUsers } from './users-api';
+import { importUsers, listDeletedUsers, listUsers } from './users-api';
 
 vi.mock('./api', () => ({
   api: {
@@ -30,6 +30,14 @@ describe('central API runtime contracts', () => {
 
     await expect(listUsers()).rejects.toThrow('Некорректный ответ API');
     await expect(listDeletedUsers()).rejects.toThrow('Некорректный ответ API');
+  });
+
+  it('rejects malformed users import result', async () => {
+    vi.mocked(api.post).mockResolvedValue({ created: 1, errors: 'not-an-array' });
+
+    await expect(importUsers(new File(['xlsx'], 'users.xlsx'))).rejects.toThrow(
+      'Некорректный ответ API',
+    );
   });
 
   it('rejects malformed notifications', async () => {

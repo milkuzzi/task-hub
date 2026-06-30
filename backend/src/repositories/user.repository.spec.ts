@@ -4,14 +4,14 @@ import { UserRepository } from './user.repository';
 
 describe('UserRepository.acquirePrimaryAdminCreationLock', () => {
   it('uses a transaction-scoped PostgreSQL advisory lock', async () => {
-    const queryRawUnsafe = jest.fn().mockResolvedValue([{ pg_advisory_xact_lock: null }]);
+    const executeRawUnsafe = jest.fn().mockResolvedValue(1);
     const repository = new UserRepository({} as PrismaService);
 
     await repository.acquirePrimaryAdminCreationLock({
-      $queryRawUnsafe: queryRawUnsafe,
+      $executeRawUnsafe: executeRawUnsafe,
     } as unknown as Prisma.TransactionClient);
 
-    expect(queryRawUnsafe).toHaveBeenCalledWith(
+    expect(executeRawUnsafe).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       'task-hub:create-primary-admin',
     );

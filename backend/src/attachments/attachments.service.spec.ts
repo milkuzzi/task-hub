@@ -436,3 +436,71 @@ describe('AttachmentsService.openDocumentPreview', () => {
     expect(h.documentPreviewService.convertToPdf).not.toHaveBeenCalled();
   });
 });
+
+describe('AttachmentsService.describeDocumentLinks', () => {
+  it('возвращает имена PDF и оригинала без чтения файла и конвертации', async () => {
+    const documentPreviewService = {
+      supports: jest.fn(() => true),
+      convertToPdf: jest.fn(),
+    };
+    const h = buildHarness({
+      attachment: makeAttachment({
+        originalName: 'report.final.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }),
+      documentPreviewService,
+    });
+
+    const result = await h.service.describeDocumentLinks('executor-1', 'attachment-1');
+
+    expect(result).toEqual({
+      previewFileName: 'report.final.pdf',
+      originalFileName: 'report.final.xlsx',
+    });
+    expect(h.documentPreviewService.supports).toHaveBeenCalledWith(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'report.final.xlsx',
+    );
+    expect(h.storage.readDecompressed).not.toHaveBeenCalled();
+    expect(h.documentPreviewService.convertToPdf).not.toHaveBeenCalled();
+  });
+
+  it('не выдаёт descriptor для неподдержанного вложения', async () => {
+    const h = buildHarness({
+      attachment: makeAttachment({ originalName: 'archive.zip', mimeType: 'application/zip' }),
+    });
+
+    await expect(
+      h.service.describeDocumentLinks('executor-1', 'attachment-1'),
+    ).rejects.toBeInstanceOf(EntityNotFoundException);
+  });
+});
+
+describe('AttachmentsService.openOriginalContent', () => {
+  it('отдаёт распакованный оригинал после проверки доступа', async () => {
+    const h = buildHarness({
+      attachment: makeAttachment({
+        originalName: 'report.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }),
+    });
+
+    const result = await h.service.openOriginalContent('executor-1', 'attachment-1');
+
+    expect(h.storage.readDecompressed).toHaveBeenCalledWith('task-1/report.zst');
+    expect(result).toEqual({
+      content: Buffer.from('image-bytes'),
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName: 'report.xlsx',
+    });
+  });
+
+  it('не раскрывает оригинал постороннему участнику', async () => {
+    const h = buildHarness();
+
+    await expect(
+      h.service.openOriginalContent('outsider-1', 'attachment-1'),
+    ).rejects.toBeInstanceOf(EntityNotFoundException);
+    expect(h.storage.readDecompressed).not.toHaveBeenCalled();
+  });
+});

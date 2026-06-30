@@ -67,10 +67,16 @@ The application exposes Prometheus gauges for release gates:
 - `taskhub_backup_restic_offsite_configured` must be `1`; local filesystem
   restic repositories are not considered offsite.
 
+Set `METRICS_TOKEN` in production so `/metrics` requires
+`Authorization: Bearer <token>`. Pass the same value to release smoke through
+`TASKHUB_METRICS_TOKEN`.
+
 Run the production smoke after deployment:
 
 ```bash
-TASKHUB_BASE_URL=https://your-domain.example npm run smoke:release
+TASKHUB_BASE_URL=https://your-domain.example \
+TASKHUB_METRICS_TOKEN="$METRICS_TOKEN" \
+npm run smoke:release
 ```
 
 ## Container Health

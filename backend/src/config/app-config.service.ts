@@ -7,6 +7,7 @@ import {
   BackupConfig,
   DatabaseConfig,
   LimitsConfig,
+  MetricsConfig,
   MaxConfig,
   RedisConfig,
   ReminderThresholdsConfig,
@@ -27,6 +28,10 @@ export class AppConfigService {
 
   get app(): AppEnv {
     return this.config.get('app', { infer: true });
+  }
+
+  get metrics(): MetricsConfig {
+    return this.config.get('metrics', { infer: true });
   }
 
   get auth(): AuthConfig {

@@ -22,7 +22,9 @@ import {
 import { DocumentPreviewService } from './document-preview.service';
 import {
   CompressedStream,
+  DocumentLinkDescriptor,
   DocumentPreview,
+  OriginalAttachmentContent,
   ThumbnailResult,
   UploadFile,
   UploadedAttachment,
@@ -469,6 +471,67 @@ export class AttachmentsService {
       content: preview.content,
       mimeType: preview.mimeType,
       fileName: this.previewFileName(attachment.originalName),
+    };
+  }
+
+  /**
+   * Проверяет доступность офисного Вложения и возвращает имена файлов для
+   * внешних ссылок MAX mini-app без запуска LibreOffice-конвертации.
+   */
+  async describeDocumentLinks(
+    userId: string,
+    attachmentId: string,
+  ): Promise<DocumentLinkDescriptor> {
+    const user = await this.userRepository.findActiveById(userId);
+    if (user === null) {
+      throw new AccessDeniedException('Учётная запись пользователя не найдена или удалена.');
+    }
+
+    const attachment = await this.attachmentRepository.findById(attachmentId);
+    if (attachment === null) {
+      throw new EntityNotFoundException('Вложение не найдено или недоступно.');
+    }
+
+    await this.loadParticipantTaskForAttachment(user, attachment);
+
+    if (!this.documentPreviewService.supports(attachment.mimeType, attachment.originalName)) {
+      throw new EntityNotFoundException('Предпросмотр недоступен для этого типа вложения.');
+    }
+
+    return {
+      previewFileName: this.previewFileName(attachment.originalName),
+      originalFileName: attachment.originalName,
+    };
+  }
+
+  /**
+   * Открывает исходное Вложение в распакованном виде для внешнего скачивания.
+   *
+   * Используется временными ticket-ссылками MAX mini-app, где внешний браузер
+   * или системный viewer не может передать Bearer-токен и выполнить клиентскую
+   * распаковку.
+   */
+  async openOriginalContent(
+    userId: string,
+    attachmentId: string,
+  ): Promise<OriginalAttachmentContent> {
+    const user = await this.userRepository.findActiveById(userId);
+    if (user === null) {
+      throw new AccessDeniedException('Учётная запись пользователя не найдена или удалена.');
+    }
+
+    const attachment = await this.attachmentRepository.findById(attachmentId);
+    if (attachment === null) {
+      throw new EntityNotFoundException('Вложение не найдено или недоступно.');
+    }
+
+    await this.loadParticipantTaskForAttachment(user, attachment);
+
+    const content = await this.storage.readDecompressed(attachment.storagePath);
+    return {
+      content,
+      mimeType: attachment.mimeType,
+      fileName: attachment.originalName,
     };
   }
 

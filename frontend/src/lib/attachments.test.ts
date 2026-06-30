@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachmentPreviewKind,
   decompress,
+  fetchDocumentExternalLinks,
   fetchDocumentPreviewBlob,
   formatAttachmentSize,
   genericIconType,
@@ -22,6 +23,7 @@ import type { AttachmentMeta } from "./chat-api";
 
 const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -156,6 +158,14 @@ describe("attachmentPreviewKind", () => {
     expect(attachmentPreviewKind(meta({ mimeType: "video/mp4" }))).toBe(
       "video",
     );
+    expect(
+      attachmentPreviewKind(
+        meta({
+          mimeType: "application/octet-stream",
+          originalName: "clip.mp4",
+        }),
+      ),
+    ).toBe("video");
     expect(attachmentPreviewKind(meta({ mimeType: "audio/mpeg" }))).toBe(
       "audio",
     );
@@ -317,9 +327,17 @@ describe("document helpers", () => {
     ).toBe(false);
   });
 
-  it("распознаёт видео по MIME-типу", () => {
+  it("распознаёт видео по MIME-типу и расширению", () => {
     expect(isPreviewableVideo("video/mp4")).toBe(true);
-    expect(isPreviewableVideo("application/octet-stream")).toBe(false);
+    expect(isPreviewableVideo("application/octet-stream", "clip.mp4")).toBe(
+      true,
+    );
+    expect(isPreviewableVideo("application/octet-stream", "camera.MOV")).toBe(
+      true,
+    );
+    expect(isPreviewableVideo("application/octet-stream", "file.bin")).toBe(
+      false,
+    );
   });
 
   it("распознаёт аудио по MIME-типу", () => {
@@ -336,6 +354,9 @@ describe("genericIconType", () => {
   it("сопоставляет MIME-типу категорию значка", () => {
     expect(genericIconType("image/png")).toBe("image");
     expect(genericIconType("video/mp4")).toBe("video");
+    expect(genericIconType("application/octet-stream", "clip.mp4")).toBe(
+      "video",
+    );
     expect(genericIconType("audio/mpeg")).toBe("audio");
     expect(genericIconType("text/csv")).toBe("spreadsheet");
     expect(genericIconType("application/pdf")).toBe("pdf");
@@ -392,6 +413,33 @@ describe("openAttachment", () => {
     result.revoke();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:attachment-preview");
   });
+
+  it("создаёт video Blob по расширению, если сервер отдал application/octet-stream", async () => {
+    apiMock.get.mockResolvedValue({
+      data: bytes("video-bytes").buffer,
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-compression": "none",
+        "x-checksum": "",
+      },
+    });
+
+    const result = await openAttachment(
+      meta({
+        originalName: "clip.mp4",
+        mimeType: "application/octet-stream",
+        compression: "none",
+        checksum: "",
+      }),
+    );
+
+    expect(result.mimeType).toBe("video/mp4");
+    expect(result.blob.type).toBe("video/mp4");
+    expect(result.url).toBe("blob:attachment-preview");
+
+    result.revoke();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:attachment-preview");
+  });
 });
 
 describe("fetchDocumentPreviewBlob", () => {
@@ -407,6 +455,21 @@ describe("fetchDocumentPreviewBlob", () => {
       responseType: "blob",
       timeout: 120_000,
     });
+  });
+});
+
+describe("fetchDocumentExternalLinks", () => {
+  it("запрашивает временные ссылки на PDF и оригинал документа", async () => {
+    const links = {
+      preview: { url: "/api/attachment-tickets/preview-token", fileName: "report.pdf" },
+      original: { url: "/api/attachment-tickets/original-token", fileName: "report.xlsx" },
+      expiresAt: "2026-06-30T10:05:00.000Z",
+    };
+    apiMock.post.mockResolvedValue({ data: links });
+
+    await expect(fetchDocumentExternalLinks("att-1")).resolves.toEqual(links);
+
+    expect(apiMock.post).toHaveBeenCalledWith("/attachments/att-1/document-links", {});
   });
 });
 
